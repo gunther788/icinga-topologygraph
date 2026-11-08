@@ -38,7 +38,8 @@ const hostStyle = page => page.evaluate(() => {
     return result;
 });
 
-// Colour and opacity of the arrow into each child, from the drawn paths
+// Colour and opacity of the arrow from each child (arrows are drawn from the
+// child up to its parent), from the drawn paths
 const arrowsInto = page => page.evaluate(() => {
     const hosts = [...document.querySelectorAll('.topologygraph-viewport svg a')].map(a => {
         const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(a.getAttribute('transform'));
@@ -47,8 +48,8 @@ const arrowsInto = page => page.evaluate(() => {
     const result = {};
     document.querySelectorAll('.topologygraph-viewport svg path[marker-end]').forEach(path => {
         const n = path.getAttribute('d').match(/-?[\d.]+/g).map(Number);
-        const end = {x: n[n.length - 2], y: n[n.length - 1]};
-        const child = hosts.find(h => Math.abs(h.x - end.x) < 1 && Math.abs(h.y - end.y) < 1);
+        const start = {x: n[0], y: n[1]};
+        const child = hosts.find(h => Math.abs(h.x - start.x) < 1 && Math.abs(h.y - start.y) < 1);
         (result[child.name] = result[child.name] || []).push({
             stroke: path.getAttribute('stroke'),
             opacity: +path.getAttribute('opacity'),
@@ -91,7 +92,7 @@ test('host states, handled problems and service rings', async () => {
     }
 });
 
-test('arrows take the colour of the host they point at', async () => {
+test('arrows take the colour of the child they start from', async () => {
     const {page, close} = await open({data: statusSample()});
     try {
         const a = await arrowsInto(page);
