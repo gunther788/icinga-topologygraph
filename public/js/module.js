@@ -164,6 +164,24 @@
         return {columns, layer, position, layerCount};
     }
 
+    /**
+     * Hosts that have parents and share exactly the same parents and the same
+     * children with at least one other host: drawn together in one box, with
+     * one arrow from each parent into the box and one from the box to each
+     * child. Returns arrays of names, each sorted.
+     */
+    function siblingGroups(names, parentsOf, childrenOf) {
+        const byKey = new Map();
+        names.forEach(name => {
+            const parents = parentsOf.get(name) || [];
+            if (!parents.length) return;
+            const key = parents.slice().sort().join("\0") + "\u0001" + (childrenOf.get(name) || []).slice().sort().join("\0");
+            if (!byKey.has(key)) byKey.set(key, []);
+            byKey.get(key).push(name);
+        });
+        return [...byKey.values()].filter(group => group.length > 1).map(group => group.sort((a, b) => d3.ascending(a, b)));
+    }
+
     // Drawing constants. BASE spacing is the tightest layout; it is widened to
     // fill the window when there is room (see computeLayout).
     const FONT_SIZE = 12;
@@ -176,12 +194,15 @@
      * Place a column of hosts (in this order) as close as possible to their
      * target heights, keeping at least `gap` between neighbours: least squares
      * under the ordering constraint, solved by pool-adjacent-violators on
-     * y[i] - i * gap. The result is shifted to stay within [lo, hi] if it can.
+     * y[i] - i * gap. gap can also be an array of each host's minimum offset
+     * from the first one, for uneven gaps. The result is shifted to stay
+     * within [lo, hi] if it can.
      */
     function alignColumn(targets, gap, lo, hi) {
+        const off = i => Array.isArray(gap) ? gap[i] : i * gap;
         const blocks = [];
         targets.forEach((t, i) => {
-            blocks.push({sum: t - i * gap, count: 1});
+            blocks.push({sum: t - off(i), count: 1});
             while (blocks.length > 1) {
                 const b = blocks[blocks.length - 1], a = blocks[blocks.length - 2];
                 if (a.sum / a.count <= b.sum / b.count) break;
@@ -192,7 +213,7 @@
         });
         const ys = [];
         blocks.forEach(b => {
-            for (let k = 0; k < b.count; k++) ys.push(b.sum / b.count + ys.length * gap);
+            for (let k = 0; k < b.count; k++) ys.push(b.sum / b.count + off(ys.length));
         });
         if (!ys.length) return ys;
         let shift = 0;
@@ -206,7 +227,9 @@
      *
      * Hosts keep their dependency level (column). The rightmost level (hosts
      * with no parents) is wrapped into side-by-side sub-columns, with hosts that
-     * are parents of the same children kept together as one boxed group. The
+     * are parents of the same children kept together as one boxed group.
+     * Further left, hosts with the same parents and children are boxed too
+     * (see siblingGroups) and move as one block. The
      * height of those sub-columns is chosen so the diagram's shape matches the
      * viewport's, then rows are ordered to minimise crossing arrows, and finally
      * the gaps are widened so the diagram fills the viewport at 100%.
@@ -225,6 +248,26 @@
             parentsOf.get(l.target).push(l.source);
         });
         const rightmost = new Set(columns[0]);
+        // Hosts further left with the same parents and children share a box
+        const siblingOf = new Map();
+        siblingGroups(nodes.map(n => n.name), parentsOf, childrenOf).forEach(names => {
+            const group = {names, children: childrenOf.get(names[0]).slice()};
+            names.forEach(name => siblingOf.set(name, group));
+        });
+        // Keep each sibling group together in a level's row order
+        const cluster = names => {
+            const out = [];
+            const done = new Set();
+            names.forEach(name => {
+                const group = siblingOf.get(name);
+                if (!group) out.push(name);
+                else if (!done.has(group)) {
+                    done.add(group);
+                    out.push(...group.names);
+                }
+            });
+            return out;
+        };
 
         // Measure labels so each column leaves room for its text
         const labelWidth = measureLabels(nodes);
@@ -326,7 +369,8 @@
          * pinned optionally fixes some rightmost groups at {k, start}.
          * sp is the spacing ({rowHeight, columnGap, subColumnGap}).
          */
-        const place = (order, spread = 1.5, pinned = null, sp = BASE) => {
+        const place = (rawOrder, spread = 1.5, pinned = null, sp = BASE) => {
+            const order = rawOrder.map((names, col) => col ? cluster(names) : names);
             const rowY = row => PADDING + row * sp.rowHeight;
             const coords = new Map();
             let x = PADDING;
@@ -344,15 +388,19 @@
             // neighbour's arrows start or end), keeping the row order and at
             // least one row between hosts. Alternate directions a few times so
             // alignment can travel along chains.
-            const alignLeft = (anchorOf, rounds) => {
+            const alignLeft = (hostAnchor, rounds) => {
                 const lo = rowY(0), hi = rowY(maxRows - 1);
+                // A sibling group's arrows meet at the middle of its box
+                const middleOf = (group, at) => d3.mean(group.names, at);
+                const anchorOf = name => siblingOf.has(name) ? middleOf(siblingOf.get(name), hostAnchor) : hostAnchor(name);
                 const target = name => {
                     const ys = parentsOf.get(name).concat(childrenOf.get(name))
                         .map(anchorOf).filter(y => y !== undefined);
                     // Line the host up exactly with one neighbour: the median, or
                     // with an even count whichever middle value is nearer to where
-                    // the host is now (an average would slope all of its arrows)
-                    const own = coords.get(name).y;
+                    // the host is now (an average would slope all of its arrows).
+                    // Siblings all aim for the same height, so they stay together.
+                    const own = siblingOf.has(name) ? middleOf(siblingOf.get(name), n => coords.get(n).y) : coords.get(name).y;
                     if (!ys.length) return own;
                     ys.sort((a, b) => a - b);
                     const mid = ys.length >> 1;
@@ -360,7 +408,15 @@
                     return Math.abs(ys[mid - 1] - own) <= Math.abs(ys[mid] - own) ? ys[mid - 1] : ys[mid];
                 };
                 const alignOne = col => {
-                    const ys = alignColumn(order[col].map(target), sp.rowHeight, lo, hi);
+                    // Half a row extra around each sibling box keeps it clear of its neighbours
+                    const offsets = [];
+                    order[col].forEach((name, i) => {
+                        let offset = i ? offsets[i - 1] + sp.rowHeight : 0;
+                        const before = i ? siblingOf.get(order[col][i - 1]) : undefined, here = siblingOf.get(name);
+                        if (i && before !== here && (before || here)) offset += sp.rowHeight / 2;
+                        offsets.push(offset);
+                    });
+                    const ys = alignColumn(order[col].map(target), offsets, lo, hi);
                     order[col].forEach((name, i) => coords.get(name).y = ys[i]);
                 };
                 for (let round = 0; round < rounds; round++) {
@@ -474,25 +530,48 @@
                 });
             });
 
-            // Edges leave from the far (left) end of the parent's label, or from
-            // the box of a rightmost group, and run left into the child's dot.
-            const edges = validLinks
-                .filter(l => !rightmost.has(l.source))
-                .map(l => {
-                    const p = coords.get(l.source);
-                    return {
-                        source: {x: p.x - LABEL_OFFSET - labelWidth.get(l.source) - 5, y: p.y},
-                        target: coords.get(l.target),
-                        child: l.target,
-                        parents: [l.source]
-                    };
+            // Sibling groups further left
+            const seenSiblings = new Set();
+            siblingOf.forEach(group => {
+                if (seenSiblings.has(group)) return;
+                seenSiblings.add(group);
+                const ys = group.names.map(name => coords.get(name).y);
+                const x = coords.get(group.names[0]).x;
+                boxes.push({
+                    names: group.names,
+                    children: group.children,
+                    sibling: true,
+                    x0: x - LABEL_OFFSET - widest(group.names) - BOX_PAD_X,
+                    x1: x + 5 + BOX_PAD_X,
+                    y0: Math.min(...ys) - sp.rowHeight / 2 + 2,
+                    y1: Math.max(...ys) + sp.rowHeight / 2 - 2
                 });
-            boxes.forEach(box => {
-                const start = {x: box.x0, y: (box.y0 + box.y1) / 2};
-                box.children.forEach(child => edges.push({
-                    source: start, target: coords.get(child), child, parents: box.names
-                }));
             });
+
+            // Edges leave from the far (left) end of the parent's label, or from
+            // the box it is in, and run left into the child's dot, or into the
+            // box it is in. One edge per box, whichever of its hosts it is for.
+            const boxOf = new Map();
+            boxes.forEach(box => box.names.forEach(name => boxOf.set(name, box)));
+            const edgeMap = new Map();
+            validLinks.forEach(l => {
+                const from = boxOf.get(l.source) || l.source, to = siblingOf.has(l.target) ? boxOf.get(l.target) : l.target;
+                if (!edgeMap.has(from)) edgeMap.set(from, new Map());
+                if (edgeMap.get(from).has(to)) return;
+                const p = coords.get(l.source);
+                const children = typeof to === "string" ? [to] : to.names;
+                edgeMap.get(from).set(to, {
+                    source: typeof from === "string"
+                        ? {x: p.x - LABEL_OFFSET - labelWidth.get(l.source) - 5, y: p.y}
+                        : {x: from.x0, y: (from.y0 + from.y1) / 2},
+                    target: typeof to === "string" ? coords.get(to) : {x: to.x1, y: (to.y0 + to.y1) / 2},
+                    child: children[0],
+                    children,
+                    parents: typeof from === "string" ? [from] : from.names
+                });
+            });
+            const edges = [];
+            edgeMap.forEach(targets => targets.forEach(edge => edges.push(edge)));
 
             // Where each host's edges start, for ordering its children
             const anchorY = new Map();
@@ -529,7 +608,7 @@
         const obstacleHits = geo => {
             const obstacles = geo.boxes.map(b => ({x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1}));
             geo.coords.forEach((p, name) => {
-                if (rightmost.has(name)) return; // already inside a box
+                if (rightmost.has(name) || siblingOf.has(name)) return; // already inside a box
                 obstacles.push({
                     x0: p.x - LABEL_OFFSET - labelWidth.get(name), x1: p.x + 5,
                     y0: p.y - BASE.rowHeight / 2 + 5, y1: p.y + BASE.rowHeight / 2 - 5
@@ -727,7 +806,8 @@
      * Parents are on the right (direction LEFT). Hosts without parents are
      * grouped by their exact set of children, as in the standard layout, and
      * each group is one ELK node the size of its box, so a group's arrows leave
-     * from a single point. Every host has fixed ports: arrows leave from the
+     * from a single point; hosts further left with the same parents and
+     * children are one ELK node too. Every host has fixed ports: arrows leave from the
      * left end of the label and arrive at the dot. ELK routes the arrows
      * orthogonally around hosts and boxes.
      *
@@ -750,9 +830,11 @@
             const names = new Set(nodes.map(n => n.name));
             const validLinks = links.filter(l => names.has(l.source) && names.has(l.target) && l.source !== l.target);
             const childrenOf = new Map(nodes.map(n => [n.name, []]));
+            const parentsOf = new Map(nodes.map(n => [n.name, []]));
             const hasParent = new Set();
             validLinks.forEach(l => {
                 childrenOf.get(l.source).push(l.target);
+                parentsOf.get(l.target).push(l.source);
                 hasParent.add(l.target);
             });
 
@@ -774,14 +856,26 @@
                 group.width = BOX_PAD_X + Math.max(...group.names.map(name => labelWidth.get(name))) + LABEL_OFFSET + 5 + BOX_PAD_X;
                 group.height = group.names.length * ROW + 4;
             });
+            // Hosts further left with the same parents and children: one
+            // node the size of their box, arrows in on the right, out on the left
+            const siblings = siblingGroups(nodes.map(n => n.name), parentsOf, childrenOf).map((names, i) => ({
+                id: "siblings:" + i, names, children: childrenOf.get(names[0]).slice(),
+                width: BOX_PAD_X + Math.max(...names.map(name => labelWidth.get(name))) + LABEL_OFFSET + 5 + BOX_PAD_X,
+                height: names.length * ROW + 4
+            }));
+            const siblingOf = new Map();
+            siblings.forEach(group => group.names.forEach(name => siblingOf.set(name, group)));
+            const unitOf = name => groupOf.has(name) ? groupOf.get(name).id : siblingOf.has(name) ? siblingOf.get(name).id : name;
             const port = (id, side, x, y) => ({id, x, y, width: 0, height: 0, layoutOptions: {"elk.port.side": side}});
 
-            // One arrow per parent and child; a group's members share theirs
+            // One arrow per parent and child; the hosts of a box share theirs
             const arrows = new Map();
             validLinks.forEach(l => {
-                const from = groupOf.has(l.source) ? groupOf.get(l.source).id : l.source;
-                const id = from + "->" + l.target;
-                if (!arrows.has(id)) arrows.set(id, {id, from, child: l.target});
+                const from = unitOf(l.source), to = unitOf(l.target);
+                const id = from + "->" + to;
+                if (!arrows.has(id)) {
+                    arrows.set(id, {id, from, to, children: siblingOf.has(l.target) ? siblingOf.get(l.target).names : [l.target]});
+                }
             });
 
             const layoutOptions = {
@@ -821,7 +915,13 @@
                         edges.push({id: id + ":edge", sources: [previous + ":out"], targets: [id + ":in"]});
                     }
                 });
-                nodes.filter(n => hasParent.has(n.name)).forEach(n => {
+                siblings.forEach(group => children.push({
+                    id: group.id, width: group.width, height: group.height,
+                    layoutOptions: {"elk.portConstraints": "FIXED_POS"},
+                    ports: [port(group.id + ":out", "WEST", 0, group.height / 2),
+                        port(group.id + ":in", "EAST", group.width, group.height / 2)]
+                }));
+                nodes.filter(n => hasParent.has(n.name) && !siblingOf.has(n.name)).forEach(n => {
                     const width = labelWidth.get(n.name) + LABEL_OFFSET + 5 + DOT_PAD;
                     children.push({
                         id: n.name, width, height: ROW,
@@ -832,7 +932,7 @@
                 arrows.forEach(a => {
                     const stones = groupById.has(a.from) ? (chains.get(a.from) || 0) : 0;
                     const start = stones ? a.from + ":stone" + stones : a.from;
-                    edges.push({id: a.id, sources: [start + ":out"], targets: [a.child + ":in"]});
+                    edges.push({id: a.id, sources: [start + ":out"], targets: [a.to + ":in"]});
                 });
                 return {id: "root", layoutOptions, children, edges};
             };
@@ -856,27 +956,43 @@
                         x0: box.x, x1: box.x + box.width, y0: box.y, y1: box.y + box.height
                     });
                 });
-                nodes.filter(n => hasParent.has(n.name)).forEach(n => {
+                const siblingBoxes = new Map();
+                siblings.forEach(group => {
+                    const box = placed.get(group.id);
+                    const dotX = box.x + box.width - BOX_PAD_X - 5;
+                    group.names.forEach((name, i) => coords.set(name, {x: dotX, y: box.y + 2 + ROW / 2 + i * ROW}));
+                    const drawnBox = {
+                        names: group.names, children: group.children, sibling: true,
+                        x0: box.x, x1: box.x + box.width, y0: box.y, y1: box.y + box.height
+                    };
+                    boxes.push(drawnBox);
+                    siblingBoxes.set(group.id, drawnBox);
+                });
+                nodes.filter(n => hasParent.has(n.name) && !siblingOf.has(n.name)).forEach(n => {
                     const box = placed.get(n.name);
                     coords.set(n.name, {x: box.x + labelWidth.get(n.name) + LABEL_OFFSET, y: box.y + ROW / 2});
                 });
 
                 const edges = [...arrows.values()].map(a => {
-                    const dot = coords.get(a.child);
+                    // Into a box: its right edge (the port); else the dot
+                    const box = siblingBoxes.get(a.to);
+                    const end = box ? {x: box.x1, y: (box.y0 + box.y1) / 2} : coords.get(a.to);
                     const points = [];
                     // Through the stepping stones first, if any
                     const stones = groupById.has(a.from) ? (chains.get(a.from) || 0) : 0;
                     for (let i = 1; i <= stones; i++) points.push(...sectionPoints(a.from + ":stone" + i + ":edge"));
                     points.push(...sectionPoints(a.id));
-                    if (!points.length) points.push({x: dot.x + 30, y: dot.y});
+                    if (!points.length) points.push({x: end.x + 30, y: end.y});
                     // Finish at the dot (the port sits just right of it)
-                    points.push({x: dot.x, y: dot.y});
+                    if (!box) points.push({x: end.x, y: end.y});
+                    const from = groupById.get(a.from) || siblings.find(g => g.id === a.from);
                     return {
                         source: points[0],
-                        target: dot,
-                        child: a.child,
-                        // A group's arrow belongs to all of its members
-                        parents: groupById.has(a.from) ? groupById.get(a.from).names : [a.from],
+                        target: end,
+                        child: a.children[0],
+                        children: a.children,
+                        // A box's arrow belongs to all of its hosts
+                        parents: from ? from.names : [a.from],
                         points
                     };
                 });
@@ -1409,12 +1525,18 @@
                 const nodeByName = new Map(nodes.map(n => [n.name, n]));
                 // Arrows take the colour of a child that is down or unreachable;
                 // handled problems are faded
-                const childOf = e => nodeByName.get(e.child);
+                // An arrow into a box is for all of its hosts: the worst of them
+                // decides its colour
+                const childrenOfEdge = e => (e.children || [e.child]).map(name => nodeByName.get(name)).filter(Boolean);
+                const childOf = e => {
+                    const children = childrenOfEdge(e);
+                    return children.find(c => isProblem(c) && !isHandled(c)) || children.find(c => isProblem(c)) || children[0];
+                };
                 // Two kinds of arrows: between hosts of the group (blue), and
                 // dependencies with a host outside the group at either end
                 // (gray). Arrows into a host that is down or unreachable keep
                 // that colour either way.
-                const outside = e => !childOf(e).inGroup
+                const outside = e => childrenOfEdge(e).some(c => !c.inGroup)
                     || e.parents.some(p => nodeByName.has(p) && !nodeByName.get(p).inGroup);
                 const arrowColour = e => isProblem(childOf(e)) ? stateColor(childOf(e))
                     : outside(e) ? COLOURS.edgeOutside : COLOURS.edge;
@@ -1569,9 +1691,9 @@
                     const above = reach(name, parentsOf);
                     const below = reach(name, childrenOf);
                     const related = new Set([name, ...above, ...below]);
-                    const onChain = e => e.parents.some(p =>
-                        (above.has(p) && (e.child === name || above.has(e.child)))
-                        || ((p === name || below.has(p)) && below.has(e.child)));
+                    const onChain = e => e.parents.some(p => (e.children || [e.child]).some(c =>
+                        (above.has(p) && (c === name || above.has(c)))
+                        || ((p === name || below.has(p)) && below.has(c))));
                     node.style("opacity", d => related.has(d.name) ? null : 0.15);
                     boxRects.style("opacity", b => b.names.some(n => related.has(n)) ? null : 0.15);
                     edgePaths.style("opacity", e => onChain(e) ? 1 : 0.06);
