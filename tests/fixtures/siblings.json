@@ -1,0 +1,270 @@
+{
+ "nodes": [
+  {
+   "name": "probe-shop",
+   "label": "probe-shop",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#probe-shop"
+  },
+  {
+   "name": "probe-api",
+   "label": "probe-api",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#probe-api"
+  },
+  {
+   "name": "probe-blog",
+   "label": "probe-blog",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#probe-blog"
+  },
+  {
+   "name": "lb-1",
+   "label": "lb-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#lb-1"
+  },
+  {
+   "name": "lb-2",
+   "label": "lb-2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#lb-2"
+  },
+  {
+   "name": "web-1",
+   "label": "web-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#web-1"
+  },
+  {
+   "name": "web-2",
+   "label": "web-2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#web-2"
+  },
+  {
+   "name": "web-3",
+   "label": "web-3",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#web-3"
+  },
+  {
+   "name": "web-4",
+   "label": "web-4",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#web-4"
+  },
+  {
+   "name": "app-1",
+   "label": "app-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": false,
+   "link": "#app-1"
+  },
+  {
+   "name": "app-2",
+   "label": "app-2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": false,
+   "link": "#app-2"
+  },
+  {
+   "name": "app-3",
+   "label": "app-3",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": false,
+   "link": "#app-3"
+  },
+  {
+   "name": "db-main",
+   "label": "db-main",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": false,
+   "link": "#db-main"
+  },
+  {
+   "name": "db-replica",
+   "label": "db-replica",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": false,
+   "link": "#db-replica"
+  },
+  {
+   "name": "cache",
+   "label": "cache",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#cache"
+  },
+  {
+   "name": "api-gw",
+   "label": "api-gw",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#api-gw"
+  }
+ ],
+ "links": [
+  {
+   "source": "probe-shop",
+   "target": "lb-1"
+  },
+  {
+   "source": "probe-shop",
+   "target": "lb-2"
+  },
+  {
+   "source": "probe-api",
+   "target": "lb-1"
+  },
+  {
+   "source": "probe-api",
+   "target": "lb-2"
+  },
+  {
+   "source": "probe-blog",
+   "target": "web-4"
+  },
+  {
+   "source": "probe-api",
+   "target": "api-gw"
+  },
+  {
+   "source": "lb-1",
+   "target": "web-1"
+  },
+  {
+   "source": "lb-1",
+   "target": "web-2"
+  },
+  {
+   "source": "lb-1",
+   "target": "web-3"
+  },
+  {
+   "source": "lb-2",
+   "target": "web-1"
+  },
+  {
+   "source": "lb-2",
+   "target": "web-2"
+  },
+  {
+   "source": "lb-2",
+   "target": "web-3"
+  },
+  {
+   "source": "lb-1",
+   "target": "web-4"
+  },
+  {
+   "source": "web-1",
+   "target": "app-1"
+  },
+  {
+   "source": "web-1",
+   "target": "app-2"
+  },
+  {
+   "source": "web-1",
+   "target": "app-3"
+  },
+  {
+   "source": "web-2",
+   "target": "app-1"
+  },
+  {
+   "source": "web-2",
+   "target": "app-2"
+  },
+  {
+   "source": "web-2",
+   "target": "app-3"
+  },
+  {
+   "source": "web-3",
+   "target": "app-1"
+  },
+  {
+   "source": "web-3",
+   "target": "app-2"
+  },
+  {
+   "source": "web-3",
+   "target": "app-3"
+  },
+  {
+   "source": "api-gw",
+   "target": "cache"
+  },
+  {
+   "source": "app-1",
+   "target": "db-main"
+  },
+  {
+   "source": "app-1",
+   "target": "db-replica"
+  },
+  {
+   "source": "app-2",
+   "target": "db-main"
+  },
+  {
+   "source": "app-2",
+   "target": "db-replica"
+  },
+  {
+   "source": "app-3",
+   "target": "db-main"
+  },
+  {
+   "source": "app-3",
+   "target": "db-replica"
+  },
+  {
+   "source": "web-4",
+   "target": "cache"
+  }
+ ]
+}
