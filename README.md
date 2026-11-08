@@ -27,20 +27,21 @@ group, the host groups offered on the page, and the refresh interval.
 
 ## What the graph shows
 
-- **Layout:** parents are on the right and children on the left. Each arrow points from a parent to its child.
+- **Layout:** parents are on the right and children on the left. Each arrow points from a child up to its parent, the way
+  parents are configured and data usually flows.
 - **Rightmost column:** hosts with no parents (typically the synthetic checks themselves) form the rightmost level.
   Hosts that are parents of exactly the same children are drawn together in one rounded box with a single exit point
   for their arrows. That column is wrapped into several side-by-side sub-columns, so a long list of checks doesn't
   make the graph very tall.
 - **Boxes further left:** hosts that have the same parents and the same children as each other, at least two of
-  them, are also drawn together in a box. Each parent then has one arrow into the box and the box has one arrow to
-  each child, instead of an arrow per host, so a farm of identical web or app servers reads as one step in the
-  chain. An arrow into a box takes the colour of the worst host in it.
+  them, are also drawn together in a box. The box then has one arrow to each parent and each child has one arrow
+  to the box, instead of an arrow per host, so a farm of identical web or app servers reads as one step in the
+  chain. An arrow from a box takes the colour of the worst host in it.
 - **Colours:** dots and names show host state: green for up, red for down, purple for unreachable (down only
   because a parent is down), blue for pending, grey for unknown. Problems that are acknowledged or in downtime are
   faded.
 - **Arrows:** blue between hosts of the graphed groups, gray when a host outside them is at either end (a dependency
-  that ties other hosts into the graph). Both are drawn at the same width, opacity and lightness. An arrow into a host that is down or unreachable takes that host's colour
+  that ties other hosts into the graph). Both are drawn at the same width, opacity and lightness. An arrow from a host that is down or unreachable takes that host's colour
   either way.
 - **Service problems:** a ring around a host's dot shows its worst service problem: red for critical, orange for
   warning, purple for unknown. The ring is solid while any problem is unhandled, and dashed and faded when all of
@@ -113,7 +114,7 @@ The layout tries to:
 - hosts without parents are placed next to their children instead of always on the far right;
 - more arrows come out level;
 - but the rightmost groups form a single column, which gets tall with many checks;
-- arrows into the same host share their last stretch;
+- arrows from the same host share their first stretch;
 - the diagram doesn't spread out to fill the window.
 
 **Hybrid layout** is ELK with the standard layout's wrapping: when the rightmost column of boxes is much taller than

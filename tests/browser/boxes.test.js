@@ -33,9 +33,11 @@ const drawing = page => page.evaluate(() => {
 });
 const near = (a, b) => Math.abs(a.x - b.x) < 1.5 && Math.abs(a.y - b.y) < 1.5;
 const boxWith = (d, names) => d.boxes.find(b => JSON.stringify(b.names) === JSON.stringify(names));
-// Arrows ending at the middle of a box's right edge, or leaving from the middle of its left edge
-const into = (d, box) => d.arrows.filter(a => near(a.end, {x: box.x1, y: (box.y0 + box.y1) / 2}));
-const outOf = (d, box) => d.arrows.filter(a => near(a.start, {x: box.x0, y: (box.y0 + box.y1) / 2}));
+// Arrows run from a child up to its parent. Dependencies on a box's parents
+// leave from the middle of its right edge; arrows from its children end at the
+// middle of its left edge.
+const toParents = (d, box) => d.arrows.filter(a => near(a.start, {x: box.x1, y: (box.y0 + box.y1) / 2}));
+const fromChildren = (d, box) => d.arrows.filter(a => near(a.end, {x: box.x0, y: (box.y0 + box.y1) / 2}));
 
 for (const layout of ['standard', 'elk', 'hybrid']) {
     test(`${layout}: hosts with the same parents and children share a box, with one arrow per parent and child`, async () => {
@@ -54,10 +56,10 @@ for (const layout of ['standard', 'elk', 'hybrid']) {
                 assert.ok(step >= 23.5 && step <= 30.5 && ys.every((y, i) => !i || Math.abs(y - ys[i - 1] - step) < 0.5),
                     'on consecutive rows');
             }
-            assert.equal(into(d, boxWith(d, SIBLINGS[2])).length, 2, 'web box: one arrow from lb-1, one from lb-2');
-            assert.equal(outOf(d, boxWith(d, SIBLINGS[2])).length, 1, 'web box: one arrow to the app box');
-            assert.equal(into(d, boxWith(d, SIBLINGS[0])).length, 1, 'app box: one arrow in');
-            assert.equal(into(d, boxWith(d, SIBLINGS[1])).length, 1, 'db box: one arrow in');
+            assert.equal(toParents(d, boxWith(d, SIBLINGS[2])).length, 2, 'web box: one arrow up to lb-1, one to lb-2');
+            assert.equal(fromChildren(d, boxWith(d, SIBLINGS[2])).length, 1, 'web box: one arrow from the app box');
+            assert.equal(toParents(d, boxWith(d, SIBLINGS[0])).length, 1, 'app box: one arrow up');
+            assert.equal(toParents(d, boxWith(d, SIBLINGS[1])).length, 1, 'db box: one arrow up');
             assert.equal(d.arrows.length, 13, 'one arrow per pair of boxes or hosts (the data has 30 links)');
             assert.ok(!boxWith(d, ['lb-1', 'lb-2']), 'lb-1 and lb-2 have different children: no box');
             assert.equal(d.boxes.length, 6, 'three sibling boxes and three rightmost boxes');
@@ -68,30 +70,30 @@ for (const layout of ['standard', 'elk', 'hybrid']) {
     });
 }
 
-test('a down host in a box colours the arrow into the box', async () => {
+test('a down host in a box colours the arrow from the box up to its parent', async () => {
     const data = fixture('siblings');
     data.nodes.find(n => n.name === 'app-2').state = 1;
     const {page, close} = await open({data});
     try {
         const d = await drawing(page);
-        const arrows = into(d, boxWith(d, SIBLINGS[0]));
+        const arrows = toParents(d, boxWith(d, SIBLINGS[0]));
         assert.equal(arrows.length, 1);
         assert.equal(arrows[0].stroke, '#ff5566');
-        assert.ok(outOf(d, boxWith(d, SIBLINGS[0])).every(a => a.stroke !== '#ff5566'), 'arrows out of it are not');
+        assert.ok(fromChildren(d, boxWith(d, SIBLINGS[0])).every(a => a.stroke !== '#ff5566'), 'arrows from its children are not');
     } finally {
         await close();
     }
 });
 
-test('hovering a host in a box highlights the arrows into and out of the box', async () => {
+test('hovering a host in a box highlights the arrows to and from the box', async () => {
     const {page, close} = await open({data: fixture('siblings')});
     try {
         await page.hover('.topologygraph-viewport a[href="#app-2"] circle:last-of-type');
         await page.waitForTimeout(100);
         const d = await drawing(page);
         const app = boxWith(d, SIBLINGS[0]);
-        assert.ok(into(d, app).concat(outOf(d, app)).every(a => a.opacity === '1'), 'on the chain');
-        const cacheArrows = d.arrows.filter(a => near(a.end, d.hosts.find(h => h.name === 'cache')));
+        assert.ok(toParents(d, app).concat(fromChildren(d, app)).every(a => a.opacity === '1'), 'on the chain');
+        const cacheArrows = d.arrows.filter(a => near(a.start, d.hosts.find(h => h.name === 'cache')));
         assert.ok(cacheArrows.length && cacheArrows.every(a => a.opacity !== '1'), 'other arrows are dimmed');
     } finally {
         await close();

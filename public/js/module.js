@@ -1305,7 +1305,8 @@
                 defs.append("marker")
                     .attr("id", id)
                     .attr("viewBox", "0 -5 10 10")
-                    .attr("refX", 13)
+                    // The tip touches the end of the parent's label or its box
+                    .attr("refX", 10)
                     .attr("refY", 0)
                     .attr("markerWidth", 6)
                     .attr("markerHeight", 6)
@@ -1570,7 +1571,9 @@
                     .join("path")
                     // ELK routes arrows around hosts (points); the standard
                     // layout draws a smooth curve between the two ends
-                    .attr("d", e => e.points ? roundedPath(e.points) : smoothLink(e));
+                    // Drawn from the child to the parent, so the arrowhead
+                    // points at the parent (the layout keeps edges parent first)
+                    .attr("d", e => e.points ? roundedPath(e.points.slice().reverse()) : smoothLink({source: e.target, target: e.source}));
 
                 const node = content.append("g")
                     .selectAll("a")
@@ -2080,11 +2083,11 @@
                 icon.setAttribute("height", "12");
                 icon.setAttribute("viewBox", "-10 -6 20 12");
                 const line = document.createElementNS(ns, "path");
-                line.setAttribute("d", "M9,0H-6");
+                line.setAttribute("d", "M-9,0H6");
                 line.setAttribute("stroke", colour);
                 line.setAttribute("stroke-width", "1.6");
                 const head = document.createElementNS(ns, "path");
-                head.setAttribute("d", "M-9,0L-4,-3.5L-4,3.5Z");
+                head.setAttribute("d", "M9,0L4,-3.5L4,3.5Z");
                 head.setAttribute("fill", colour);
                 icon.append(line, head);
                 return icon;
