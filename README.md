@@ -59,6 +59,12 @@ group, the host groups offered on the page, and the refresh interval.
   The line and the badge are neutral while every member is up, amber while some are down but enough are up, and
   red when too few are up. Hover over the host to see which members are down. The counts include members that
   aren't drawn.
+
+  To save space, tick **Collapse members** (kept in the page address as `members=collapsed`). Members whose only
+  children are synthetic hosts they belong to are then left out, and the synthetic host takes over their parents:
+  `dc2_worker_xray2` then points straight at `dc2_master_xray2`. The badge still shows the margin, and the hover
+  text lists the collapsed members. A member with other children stays, so no dependency is hidden. The option
+  only appears when the graph has synthetic hosts.
 - **Service problems:** a ring around a host's dot shows its worst service problem: red for critical, orange for
   warning, purple for unknown. The ring is solid while any problem is unhandled, and dashed and faded when all of
   them are acknowledged or in downtime. A legend in the bottom-left corner explains the colours.
@@ -101,6 +107,8 @@ The layout tries to:
   Group names are the Icinga object names, not display names. Unknown hosts are ignored, and so are host groups the
   settings don't offer: the page drops them from the address and says so at the bottom.
 
+- **Collapsing members:** **Collapse members** leaves out synthetic hosts' members and draws the synthetic hosts
+  in their place, as `members=collapsed`. See [What the graph shows](#what-the-graph-shows).
 - **Ignoring services without notifications:** tick **Notified services only** to leave out services that have
   notifications disabled. They then don't count towards the service rings or the counts in the hover text. The
   option is kept in the page address as `services=notified`, and combines with a host selection, for example

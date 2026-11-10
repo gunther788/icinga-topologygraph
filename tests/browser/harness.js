@@ -249,7 +249,7 @@ function routeMetrics(page) {
 
 /** Names of the hosts currently drawn */
 function drawnHosts(page) {
-    return page.$$eval('.topologygraph-viewport svg a text', texts => texts.map(t => t.textContent).sort());
+    return page.$$eval('.topologygraph-viewport svg a > text', texts => texts.map(t => t.textContent).sort());
 }
 
 module.exports = {open, settle, fixture, transform, metrics, routeMetrics, drawnHosts, ORIGIN, PAGE};
