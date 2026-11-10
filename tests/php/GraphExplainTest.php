@@ -83,6 +83,18 @@ check('counts', $x['counts'], [
     'drawn' => 4, 'drawn_as_member' => 2, 'drawn_outside' => 2, 'links' => 4, 'shown' => 3, 'selected_but_not_drawn' => 4
 ]);
 
+// A member of a synthetic host is drawn as its member, not its parent
+$withAggregate = $graph;
+// (web-1 is a member of the graphed groups; db-1, outside, is its member)
+$withAggregate['nodes'][1]['aggregate'] = ['members' => ['db-1'], 'mode' => 'any', 'needed' => 1, 'total' => 1,
+    'up' => ['db-1'], 'down' => [], 'unknown' => []];
+$withAggregate['links'][] = ['source' => 'db-1', 'target' => 'web-1'];
+$byName = [];
+foreach (GraphExplain::explain($withAggregate, ['synthetic'], [], $api)['hosts'] as $h) {
+    $byName[$h['name']] = $h;
+}
+check('member of a synthetic host', $byName['db-1']['why_drawn'], ['member of web-1', 'child of web-1']);
+
 // No selection: no extra requests, everything shown
 $requests = [];
 $plain = GraphExplain::explain($graph, ['synthetic'], [], $api);

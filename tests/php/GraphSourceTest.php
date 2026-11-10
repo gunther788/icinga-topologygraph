@@ -135,33 +135,57 @@ check('outside links: asked about the outside hosts only', $requests[3]['vars'],
 check('outside links: the line between them is added', in_array(['source' => 'dmz-1', 'target' => 'backend-1'], $graph['links'], true), true);
 check('outside links: no hosts are added', count($graph['nodes']), 4);
 
-// A synthetic host whose members aren't all drawn: their states are fetched
+// A synthetic host outside the group (a neighbour): its members aren't drawn,
+// but their states are fetched so its counts are complete
 $requests = [];
 $agg = GraphSource::fetch(fakeApi([
     'hosts' => function ($body) {
         if ($body['filter'] === 'group in host.groups') {
-            return [host('quorum-1', ['groups' => ['web-checks'], 'vars' => ['synthetic' => [
-                'members' => ['w1', 'w2', 'w3'], 'parents' => ['w1', 'w2'], 'mode' => 'quorum'
-            ]]])];
+            return [host('probe-a', ['groups' => ['web-checks']])];
         }
         return array_map(function ($name) {
-            return host($name, ['state' => $name === 'w3' ? 1 : 0]);
+            $vars = $name === 'quorum-1'
+                ? ['synthetic' => ['members' => ['w1', 'w2', 'w3'], 'parents' => [], 'mode' => 'quorum']] : [];
+            return host($name, ['state' => $name === 'w3' ? 1 : 0, 'vars' => $vars]);
         }, $body['filter_vars']['names']);
     },
     'dependencies' => [
-        ['attrs' => ['parent_host_name' => 'w1', 'child_host_name' => 'quorum-1', 'child_service_name' => '']],
-        ['attrs' => ['parent_host_name' => 'w2', 'child_host_name' => 'quorum-1', 'child_service_name' => '']]
+        ['attrs' => ['parent_host_name' => 'quorum-1', 'child_host_name' => 'probe-a', 'child_service_name' => '']]
     ],
     'services' => []
 ], $requests), 'web-checks', '/host?name=');
-check('members not drawn: one more host request, for them only', [array_column($requests, 'kind'), end($requests)['vars']],
-    [['hosts', 'dependencies', 'hosts', 'dependencies', 'services', 'hosts'], ['names' => ['w3']]]);
+check('outside synthetic host: one more host request, for its members only', [array_column($requests, 'kind'), end($requests)['vars']],
+    [['hosts', 'dependencies', 'hosts', 'services', 'hosts'], ['names' => ['w1', 'w2', 'w3']]]);
 $q = array_values(array_filter($agg['nodes'], function ($n) {
     return $n['name'] === 'quorum-1';
 }))[0];
-check('members not drawn still count', [$q['aggregate']['up'], $q['aggregate']['down'], $q['aggregate']['needed']], [['w1', 'w2'], ['w3'], 2]);
-check('members not drawn are not added to the graph', count($agg['nodes']), 3);
+check('outside synthetic host: members not drawn still count', [$q['aggregate']['up'], $q['aggregate']['down'], $q['aggregate']['needed']],
+    [['w1', 'w2'], ['w3'], 2]);
+check('outside synthetic host: its members are not added to the graph', array_column($agg['nodes'], 'name'), ['probe-a', 'quorum-1']);
 check('vars are not sent to the page', array_key_exists('vars', $q), false);
+
+// Members that aren't parents: drawn from vars.synthetic.members; a member
+// Icinga doesn't know is left out
+$requests = [];
+$noParents = GraphSource::fetch(fakeApi([
+    'hosts' => function ($body) {
+        if ($body['filter'] === 'group in host.groups') {
+            return [host('quorum-1', ['groups' => ['web-checks'], 'vars' => ['synthetic' => [
+                'members' => ['w1', 'w2', 'ghost'], 'mode' => 'quorum'
+            ]]])];
+        }
+        return array_map('host', array_values(array_diff($body['filter_vars']['names'], ['ghost'])));
+    },
+    'dependencies' => [],
+    'services' => []
+], $requests), 'web-checks', '/host?name=');
+check('members without dependencies: fetched as neighbours', $requests[2]['vars'], ['names' => ['w1', 'w2', 'ghost']]);
+check('members without dependencies: drawn and linked', [array_column($noParents['nodes'], 'name'), $noParents['links']], [
+    ['quorum-1', 'w1', 'w2'],
+    [['source' => 'w1', 'target' => 'quorum-1'], ['source' => 'w2', 'target' => 'quorum-1']]
+]);
+check('members without dependencies: unknown member counted, not drawn',
+    $noParents['nodes'][0]['aggregate']['unknown'], ['ghost']);
 
 // Hosts failing is an error for the caller
 $thrown = null;

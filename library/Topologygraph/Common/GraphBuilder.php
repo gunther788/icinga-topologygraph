@@ -78,6 +78,48 @@ final class GraphBuilder
      *
      * @return array The selection with the extra links
      */
+    /**
+     * Draw the members of synthetic hosts in the selection's groups
+     * (vars.synthetic.members) as their neighbours, linked member -> synthetic
+     * host like a parent, whether or not a dependency says so. Members need not
+     * be parents: as Icinga dependencies, every member would be required.
+     *
+     * @param array $selection As returned by select()
+     * @param array $hosts     The group hosts, from objects/hosts (with vars)
+     *
+     * @return array The selection with the members and their links added
+     */
+    public static function addAggregateMembers(array $selection, array $hosts)
+    {
+        $names = array_flip($selection['names']);
+        $links = [];
+        foreach ($selection['links'] as $link) {
+            $links[$link['source'] . "\0" . $link['target']] = $link;
+        }
+        foreach ($hosts as $host) {
+            $name = (string) $host['name'];
+            if (! isset($selection['members'][$name])) {
+                continue;
+            }
+            $vars = $host['attrs']['vars'][self::AGGREGATE_VAR] ?? null;
+            if (! is_array($vars) || empty($vars['members']) || ! is_array($vars['members'])) {
+                continue;
+            }
+            foreach ($vars['members'] as $member) {
+                $member = (string) $member;
+                if ($member === '' || $member === $name) {
+                    continue;
+                }
+                $names[$member] = true;
+                $links[$member . "\0" . $name] = ['source' => $member, 'target' => $name];
+            }
+        }
+        $selection['names'] = array_map('strval', array_keys($names));
+        $selection['links'] = array_values($links);
+
+        return $selection;
+    }
+
     public static function addLinksAmong(array $selection, array $dependencies)
     {
         $drawn = array_flip($selection['names']);

@@ -8,7 +8,8 @@ namespace Icinga\Module\Topologygraph\Common;
  *
  * 1. the hosts in the group(s)
  * 2. the host-to-host dependencies that touch them
- * 3. the hosts outside the group at the other end of those dependencies
+ * 3. the hosts outside the group at the other end of those dependencies, and
+ *    the members of synthetic hosts in the group (vars.synthetic.members)
  * 4. the host-to-host dependencies between those outside hosts (adds lines
  *    between hosts already drawn, never more hosts)
  * 5. the services of all drawn hosts (optional: without permission, or on
@@ -55,12 +56,24 @@ final class GraphSource
         );
 
         $selection = GraphBuilder::select($groupHosts, $dependencies, $groups);
+        // Members of synthetic hosts in the groups, even without a dependency
+        $selection = GraphBuilder::addAggregateMembers($selection, $groupHosts);
 
         $neighbours = array_values(array_diff($selection['names'], $groupNames));
         $neighbourHosts = $neighbours ? $api(
             'objects/hosts?' . self::HOST_ATTRS,
             ['filter' => 'host.name in names', 'filter_vars' => ['names' => $neighbours]]
         ) : [];
+
+        // Only hosts Icinga knows (a member listed in vars may not exist)
+        $known = array_flip(self::names(array_merge($groupHosts, $neighbourHosts)));
+        $selection['names'] = array_values(array_filter($selection['names'], function ($name) use ($known) {
+            return isset($known[$name]);
+        }));
+        $selection['links'] = array_values(array_filter($selection['links'], function ($link) use ($known) {
+            return isset($known[$link['source']], $known[$link['target']]);
+        }));
+        $neighbours = array_values(array_intersect($neighbours, $selection['names']));
 
         // Dependencies between two drawn hosts outside the group (e.g. a host
         // in the DMZ and one in the backend) touch no group host, so step 2

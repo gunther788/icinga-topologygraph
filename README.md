@@ -45,8 +45,8 @@ group, the host groups offered on the page, and the refresh interval.
   either way.
 - **Synthetic hosts with members:** a host with `vars.synthetic.members` aggregates those hosts, in the mode set by
   `vars.synthetic.mode`. Its members meet it on a dotted line ending in a hollow diamond, with no arrowhead, so
-  membership doesn't read as a dependency. That line replaces the dependency arrow from a member, typically
-  generated from `vars.synthetic.parents`. A badge left of the host's name shows how many members it needs out of
+  membership doesn't read as a dependency. Members are drawn whether or not they are also parents: the line
+  comes from `vars.synthetic.members`, and replaces the dependency arrow if there is one. A badge left of the host's name shows how many members it needs out of
   all of them, and how many are up, for example `2 of 3 · 2 up`:
 
   | `vars.synthetic.mode` | Members needed |
@@ -59,6 +59,12 @@ group, the host groups offered on the page, and the refresh interval.
   The line and the badge are neutral while every member is up, amber while some are down but enough are up, and
   red when too few are up. Hover over the host to see which members are down. The counts include members that
   aren't drawn.
+
+  Members don't need to be parents, and usually shouldn't be. Each Icinga `Dependency` counts on its own, so
+  with every member as a parent, one member down makes the synthetic host unreachable, and its notifications are
+  suppressed while quorum still holds, and again when quorum is lost. Hosts depending on the synthetic host can
+  be treated as unreachable too. Keep `parents` for what the synthetic host really depends on, or put the
+  member dependencies in one `redundancy_group`.
 
   To save space, tick **Collapse members** (kept in the page address as `members=collapsed`). Members whose only
   children are synthetic hosts they belong to are then left out, and the synthetic host takes over their parents:
@@ -283,7 +289,8 @@ Each update makes up to six small requests, each filtered on the Icinga side:
 
 1. the hosts in the graphed groups;
 2. the host-to-host dependencies that touch them;
-3. the hosts outside the groups at the other end of those dependencies;
+3. the hosts outside the groups at the other end of those dependencies, and the members of synthetic hosts in the
+   groups;
 4. the dependencies between those outside hosts, for example between a host in the DMZ and one in the backend. This
    adds lines between hosts that are already drawn, never more hosts;
 5. the services of all drawn hosts;
