@@ -1,0 +1,175 @@
+{
+ "nodes": [
+  {
+   "name": "master1x2",
+   "label": "master1x2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#master1x2"
+  },
+  {
+   "name": "master2x2",
+   "label": "master2x2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#master2x2"
+  },
+  {
+   "name": "master3x2",
+   "label": "master3x2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#master3x2"
+  },
+  {
+   "name": "dc2_master_xray2",
+   "label": "dc2_master_xray2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#dc2_master_xray2",
+   "aggregate": {
+    "mode": "quorum",
+    "needed": 2,
+    "total": 3,
+    "members": [
+     "master1x2",
+     "master2x2",
+     "master3x2"
+    ],
+    "up": [
+     "master1x2",
+     "master2x2",
+     "master3x2"
+    ],
+    "down": [],
+    "unknown": []
+   }
+  },
+  {
+   "name": "k8sworker51x2",
+   "label": "k8sworker51x2",
+   "state": 1,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#k8sworker51x2"
+  },
+  {
+   "name": "k8sworker52x2",
+   "label": "k8sworker52x2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#k8sworker52x2"
+  },
+  {
+   "name": "k8sworker53x2",
+   "label": "k8sworker53x2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#k8sworker53x2"
+  },
+  {
+   "name": "dc2_worker_xray2",
+   "label": "dc2_worker_xray2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#dc2_worker_xray2",
+   "aggregate": {
+    "mode": "quorum",
+    "needed": 2,
+    "total": 3,
+    "members": [
+     "k8sworker51x2",
+     "k8sworker52x2",
+     "k8sworker53x2"
+    ],
+    "up": [
+     "k8sworker52x2",
+     "k8sworker53x2"
+    ],
+    "down": [
+     "k8sworker51x2"
+    ],
+    "unknown": []
+   }
+  },
+  {
+   "name": "gateway.app.internal",
+   "label": "gateway.app.internal",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#gateway.app.internal"
+  },
+  {
+   "name": "shop.example.com",
+   "label": "shop.example.com",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "member": true,
+   "link": "#shop.example.com"
+  }
+ ],
+ "links": [
+  {
+   "source": "master1x2",
+   "target": "dc2_master_xray2"
+  },
+  {
+   "source": "master2x2",
+   "target": "dc2_master_xray2"
+  },
+  {
+   "source": "master3x2",
+   "target": "dc2_master_xray2"
+  },
+  {
+   "source": "dc2_master_xray2",
+   "target": "k8sworker51x2"
+  },
+  {
+   "source": "k8sworker51x2",
+   "target": "dc2_worker_xray2"
+  },
+  {
+   "source": "dc2_master_xray2",
+   "target": "k8sworker52x2"
+  },
+  {
+   "source": "k8sworker52x2",
+   "target": "dc2_worker_xray2"
+  },
+  {
+   "source": "dc2_master_xray2",
+   "target": "k8sworker53x2"
+  },
+  {
+   "source": "k8sworker53x2",
+   "target": "dc2_worker_xray2"
+  },
+  {
+   "source": "dc2_worker_xray2",
+   "target": "gateway.app.internal"
+  },
+  {
+   "source": "gateway.app.internal",
+   "target": "shop.example.com"
+  }
+ ]
+}

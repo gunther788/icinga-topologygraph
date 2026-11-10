@@ -157,4 +157,36 @@ check('build: notified summary empty for a host with only silenced services', [
     $mixedByName['db-1']['services']['total'], $mixedByName['db-1']['services_notified']['total']
 ], [1, 0]);
 
+// --- aggregate() ------------------------------------------------------------
+
+$workers = [
+    'w1' => ['state' => 1.0, 'last_check' => 5],   // down (the API sends floats)
+    'w2' => ['state' => 0.0, 'last_check' => 5],
+    'w3' => ['state' => 0, 'last_check' => 5],
+    'w4' => ['state' => 0, 'last_check' => 0]      // pending
+];
+$synthetic = function ($mode, array $members = ['w1', 'w2', 'w3']) {
+    return ['vars' => ['synthetic' => ['members' => $members, 'parents' => $members, 'mode' => $mode]]];
+};
+$quorum = GraphBuilder::aggregate($synthetic('quorum'), $workers);
+check('aggregate: quorum needs a majority', [$quorum['mode'], $quorum['needed'], $quorum['total']], ['quorum', 2, 3]);
+check('aggregate: members up and down', [$quorum['up'], $quorum['down'], $quorum['unknown']], [['w2', 'w3'], ['w1'], []]);
+check('aggregate: any needs one, all needs every member', [
+    GraphBuilder::aggregate($synthetic('any'), $workers)['needed'], GraphBuilder::aggregate($synthetic('ALL '), $workers)['needed']
+], [1, 3]);
+check('aggregate: quorum of four needs three', GraphBuilder::aggregate($synthetic('quorum', ['w1', 'w2', 'w3', 'w4']), $workers)['needed'], 3);
+check('aggregate: a number is a threshold (at most all)', [
+    GraphBuilder::aggregate($synthetic('2'), $workers)['needed'], GraphBuilder::aggregate($synthetic('9'), $workers)['needed']
+], [2, 3]);
+check('aggregate: unknown mode has no threshold', GraphBuilder::aggregate($synthetic('best-effort'), $workers)['needed'], null);
+check('aggregate: no mode means all', GraphBuilder::aggregate(['vars' => ['synthetic' => ['members' => ['w2']]]], $workers)['needed'], 1);
+check('aggregate: pending and unknown members are not up',
+    GraphBuilder::aggregate($synthetic('any', ['w4', 'gone']), $workers)['unknown'], ['w4', 'gone']);
+check('aggregate: none for ordinary hosts', [
+    GraphBuilder::aggregate(['vars' => ['synthetic' => ['parents' => ['w1']]]], $workers), GraphBuilder::aggregate(null, $workers)
+], [null, null]);
+check('aggregate members of several hosts, once each', GraphBuilder::aggregateMembers([
+    ['name' => 'q1', 'attrs' => $synthetic('quorum')], ['name' => 'q2', 'attrs' => $synthetic('any', ['w3', 'w4'])], ['name' => 'x', 'attrs' => []]
+]), ['w1', 'w2', 'w3', 'w4']);
+
 finish();

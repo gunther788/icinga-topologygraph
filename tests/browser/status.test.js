@@ -83,7 +83,7 @@ test('host states, handled problems and service rings', async () => {
         assert.match(s['web-2'].title, /services: 3, all OK/);
         assert.match(s['standalone'].title, /services: not available/);
 
-        const legend = await page.$$eval('.topologygraph-legend span', items => items.map(i => i.textContent));
+        const legend = await page.$$eval('.topologygraph-legend span:not([hidden])', items => items.map(i => i.textContent));
         assert.deepEqual(legend, ['up', 'down', 'unreachable (parent down)', 'acknowledged / downtime', 'pending',
             'service problem', 'within the host group', 'to or from other hosts']);
         assert.deepEqual(errors, []);
