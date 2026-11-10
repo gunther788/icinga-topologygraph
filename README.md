@@ -43,6 +43,22 @@ group, the host groups offered on the page, and the refresh interval.
 - **Arrows:** blue between hosts of the graphed groups, gray when a host outside them is at either end (a dependency
   that ties other hosts into the graph). Both are drawn at the same width, opacity and lightness. An arrow from a host that is down or unreachable takes that host's colour
   either way.
+- **Synthetic hosts with members:** a host with `vars.synthetic.members` aggregates those hosts, in the mode set by
+  `vars.synthetic.mode`. Its members meet it on a dotted line ending in a hollow diamond, with no arrowhead, so
+  membership doesn't read as a dependency. That line replaces the dependency arrow from a member, typically
+  generated from `vars.synthetic.parents`. A badge left of the host's name shows how many members it needs out of
+  all of them, and how many are up, for example `2 of 3 · 2 up`:
+
+  | `vars.synthetic.mode` | Members needed |
+  |---|---|
+  | `any` | 1 |
+  | `all` (or not set) | all of them |
+  | `quorum` | a majority: 2 of 3, 3 of 4, 3 of 5 |
+  | a number, e.g. `"2"` | that many (at most all) |
+
+  The line and the badge are neutral while every member is up, amber while some are down but enough are up, and
+  red when too few are up. Hover over the host to see which members are down. The counts include members that
+  aren't drawn.
 - **Service problems:** a ring around a host's dot shows its worst service problem: red for critical, orange for
   warning, purple for unknown. The ring is solid while any problem is unhandled, and dashed and faded when all of
   them are acknowledged or in downtime. A legend in the bottom-left corner explains the colours.
@@ -255,14 +271,18 @@ are not cached.
 
 ## Load on the Icinga API
 
-Each update makes up to five small requests, each filtered on the Icinga side:
+Each update makes up to six small requests, each filtered on the Icinga side:
 
 1. the hosts in the graphed groups;
 2. the host-to-host dependencies that touch them;
 3. the hosts outside the groups at the other end of those dependencies;
 4. the dependencies between those outside hosts, for example between a host in the DMZ and one in the backend. This
    adds lines between hosts that are already drawn, never more hosts;
-5. the services of all drawn hosts.
+5. the services of all drawn hosts;
+6. only when a synthetic host has members that aren't drawn: those members' states.
+
+Host requests include the hosts' custom variables, to read `vars.synthetic`; only the members and the mode are
+sent on to the page.
 
 The finished graph is cached on the Icinga Web server for half the refresh interval, separately for each combination
 of host groups, in a folder in the system's temporary directory. Several people looking at the same host groups

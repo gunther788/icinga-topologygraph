@@ -62,6 +62,30 @@
         return isProblem(node) && !!(node.acknowledged || node.in_downtime);
     }
 
+    // Synthetic hosts aggregating others (vars.synthetic.members and .mode):
+    // "2 of 3 · 2 up" -- members needed of all, and how many are up
+    function aggregateText(aggregate, upCount = aggregate.up.length) {
+        const needed = aggregate.needed === null ? aggregate.total + " members" : aggregate.needed + " of " + aggregate.total;
+        return needed + " \u00b7 " + upCount + " up";
+    }
+
+    // ok: every member up; degraded: some aren't, but enough are; failed:
+    // fewer are up than needed
+    function aggregateHealth(aggregate) {
+        const up = aggregate.up.length;
+        if (up === aggregate.total) return "ok";
+        if (aggregate.needed !== null && up < aggregate.needed) return "failed";
+        return "degraded";
+    }
+
+    // Room for the badge left of a synthetic host's name, at its widest
+    const BADGE_FONT = 10;
+    const BADGE_GAP = 6;
+    function badgeWidth(ctx, aggregate) {
+        ctx.font = BADGE_FONT + "px sans-serif";
+        return ctx.measureText(aggregateText(aggregate, aggregate.total)).width + 8;
+    }
+
     // One line describing a host's services for the hover text; notifiedOnly
     // when services with notifications disabled are left out
     function servicesText(services, notifiedOnly) {
@@ -87,7 +111,10 @@
      * unchanged, a refresh only needs to recolour the existing drawing.
      */
     function structureOf(data) {
-        const nodes = (data.nodes || []).map(n => [n.name, n.label, !!(n.member !== undefined ? n.member : n.synthetic), n.link]).sort();
+        const nodes = (data.nodes || []).map(n => [
+            n.name, n.label, !!(n.member !== undefined ? n.member : n.synthetic), n.link,
+            n.aggregate ? [n.aggregate.mode, n.aggregate.needed, n.aggregate.members] : null
+        ]).sort();
         const links = (data.links || []).map(l => [l.source, l.target]).sort();
         return JSON.stringify([nodes, links]);
     }
@@ -770,12 +797,14 @@
         return {coords: geo.coords, boxes: geo.boxes, edges: geo.edges, width: geo.width, height: size.height, top: size.top};
     }
 
-    // Label widths as drawn (bold for group members, italic for the rest)
+    // Label widths as drawn (bold for group members, italic for the rest),
+    // with the badge of a synthetic host
     function measureLabels(nodes) {
         const ctx = document.createElement("canvas").getContext("2d");
         return new Map(nodes.map(n => {
             ctx.font = ((n.inGroup !== undefined ? n.inGroup : n.synthetic) ? "bold" : "italic") + " " + FONT_SIZE + "px sans-serif";
-            return [n.name, ctx.measureText(n.label).width];
+            const text = ctx.measureText(n.label).width;
+            return [n.name, n.aggregate ? text + BADGE_GAP + badgeWidth(ctx, n.aggregate) : text];
         }));
     }
 
@@ -1300,6 +1329,26 @@
             // One arrowhead per arrow colour
             const arrowColours = [COLOURS.edge, COLOURS.down, COLOURS.unreachable, COLOURS.edgeOutside];
             const markerFor = colour => "url(#topologygraph-arrow-" + arrowColours.indexOf(colour) + ")";
+            // A hollow diamond where a synthetic host's members meet it
+            const diamondColours = [COLOURS.edge, COLOURS.edgeOutside, COLOURS.warning, COLOURS.down];
+            const diamondFor = colour => "url(#topologygraph-diamond-" + Math.max(0, diamondColours.indexOf(colour)) + ")";
+            diamondColours.forEach((colour, i) => {
+                const diamond = defs.append("marker")
+                    .attr("id", "topologygraph-diamond-" + i)
+                    .attr("viewBox", "0 -4 12 8")
+                    .attr("markerUnits", "userSpaceOnUse")
+                    .attr("markerWidth", 12)
+                    .attr("markerHeight", 8)
+                    // Just clear of the dot and its service ring
+                    .attr("refX", -9)
+                    .attr("refY", 0)
+                    .attr("orient", "auto");
+                diamond.append("path")
+                    .attr("d", "M0.6,0L6,-3.4L11.4,0L6,3.4Z")
+                    .attr("fill", background || "#fff")
+                    .attr("stroke", colour)
+                    .attr("stroke-width", 1.2);
+            });
             arrowColours.forEach((colour, i) => {
                 const id = "topologygraph-arrow-" + i;
                 defs.append("marker")
@@ -1539,11 +1588,33 @@
                 // that colour either way.
                 const outside = e => childrenOfEdge(e).some(c => !c.inGroup)
                     || e.parents.some(p => nodeByName.has(p) && !nodeByName.get(p).inGroup);
-                const arrowColour = e => isProblem(childOf(e)) ? stateColor(childOf(e))
-                    : outside(e) ? COLOURS.edgeOutside : COLOURS.edge;
-                const arrowOpacity = e => !isProblem(childOf(e)) ? 0.5
-                    : isHandled(childOf(e)) ? 0.35 : 0.85;
-                const arrowRank = e => !isProblem(childOf(e)) ? 0 : isHandled(childOf(e)) ? 1 : 2;
+                // A synthetic host's members meeting it: membership, not
+                // dependency. Coloured by whether the aggregate holds, not by
+                // the host's own state.
+                const aggregateOf = e => {
+                    if ((e.children || [e.child]).length !== 1) return null;
+                    const aggregate = (childOf(e) || {}).aggregate;
+                    return aggregate && e.parents.every(p => aggregate.members.includes(p)) ? aggregate : null;
+                };
+                const normalColour = e => outside(e) ? COLOURS.edgeOutside : COLOURS.edge;
+                const arrowColour = e => {
+                    const aggregate = aggregateOf(e);
+                    if (aggregate) {
+                        const health = aggregateHealth(aggregate);
+                        return health === "failed" ? COLOURS.down : health === "degraded" ? COLOURS.warning : normalColour(e);
+                    }
+                    return isProblem(childOf(e)) ? stateColor(childOf(e)) : normalColour(e);
+                };
+                const arrowOpacity = e => {
+                    const aggregate = aggregateOf(e);
+                    if (aggregate) return aggregateHealth(aggregate) === "ok" ? 0.5 : 0.85;
+                    return !isProblem(childOf(e)) ? 0.5 : isHandled(childOf(e)) ? 0.35 : 0.85;
+                };
+                const arrowRank = e => {
+                    const aggregate = aggregateOf(e);
+                    if (aggregate) return {ok: 0, degraded: 1, failed: 2}[aggregateHealth(aggregate)];
+                    return !isProblem(childOf(e)) ? 0 : isHandled(childOf(e)) ? 1 : 2;
+                };
 
                 // Boxes stay unfilled so an edge from an outer box can be followed
                 // across inner ones back to where it starts
@@ -1569,6 +1640,12 @@
                     .selectAll("path")
                     .data(geo.edges)
                     .join("path")
+                    // Membership lines: thinner and dotted, a diamond at the
+                    // synthetic host instead of an arrowhead
+                    .classed("topologygraph-aggregate", e => !!aggregateOf(e))
+                    .attr("stroke-width", e => aggregateOf(e) ? 1.4 : null)
+                    .attr("stroke-dasharray", e => aggregateOf(e) ? "1.5,3" : null)
+                    .attr("stroke-linecap", e => aggregateOf(e) ? "round" : null)
                     // ELK routes arrows around hosts (points); the standard
                     // layout draws a smooth curve between the two ends
                     // Drawn from the child to the parent, so the arrowhead
@@ -1619,14 +1696,29 @@
                     .text(d => d.label);
 
                 // Size each plate to its name as drawn
-                labels.each(function () {
+                const labelLeft = new Map();
+                labels.each(function (d) {
                     const box = this.getBBox();
+                    labelLeft.set(d.name, box.x);
                     d3.select(this.parentNode).select("rect.topologygraph-label-plate")
                         .attr("x", box.x - 2)
                         .attr("y", box.y + 1)
                         .attr("width", box.width + 4)
                         .attr("height", Math.max(0, box.height - 2));
                 });
+
+                // Badge left of a synthetic host's name: members needed of all,
+                // and how many are up
+                const badges = node.filter(d => !!d.aggregate).append("g")
+                    .attr("class", "topologygraph-badge");
+                badges.append("rect")
+                    .attr("rx", 7)
+                    .attr("fill", background || "none")
+                    .attr("stroke-width", 1);
+                badges.append("text")
+                    .attr("dy", "0.32em")
+                    .attr("text-anchor", "end")
+                    .attr("font-size", BADGE_FONT);
 
                 // Everything that depends on host states, so a refresh can
                 // recolour the drawing in place without touching the layout
@@ -1639,6 +1731,9 @@
                         stateName(d) === "unreachable" ? "(down because a parent is down)" : null,
                         servicesText(serviceSummary(d), notifiedOnly),
                         d.zone ? "zone: " + d.zone : null,
+                        d.aggregate ? d.aggregate.mode + ": needs " + aggregateText(d.aggregate) : null,
+                        d.aggregate && d.aggregate.down.length ? "members down: " + d.aggregate.down.join(", ") : null,
+                        d.aggregate && d.aggregate.unknown.length ? "members unknown or pending: " + d.aggregate.unknown.join(", ") : null,
                         d.inGroup ? null : graphedGroups.length > 1
                             ? "not in the host groups " + graphedGroups.join(", ")
                             : "not in the " + graphedGroups[0] + " host group"
@@ -1653,6 +1748,21 @@
                         .attr("stroke", d => COLOURS[ringState(d)] || "none")
                         .attr("stroke-dasharray", d => allHandled(d) ? "2,2" : null)
                         .attr("stroke-opacity", d => allHandled(d) ? 0.6 : 1);
+                    const badgeColour = d => ({ok: textColor, degraded: COLOURS.warning, failed: COLOURS.down})[aggregateHealth(d.aggregate)];
+                    badges.select("text")
+                        .attr("x", d => labelLeft.get(d.name) - BADGE_GAP - 4)
+                        .attr("fill", badgeColour)
+                        .text(d => aggregateText(d.aggregate));
+                    badges.each(function (d) {
+                        const box = d3.select(this).select("text").node().getBBox();
+                        d3.select(this).select("rect")
+                            .attr("x", box.x - 4)
+                            .attr("y", -7)
+                            .attr("width", box.width + 8)
+                            .attr("height", 14)
+                            .attr("stroke", badgeColour(d))
+                            .attr("stroke-opacity", aggregateHealth(d.aggregate) === "ok" ? 0.45 : 1);
+                    });
                     circles
                         .attr("fill", d => stateColor(d))
                         .attr("fill-opacity", d => isHandled(d) ? 0.45 : 1);
@@ -1662,7 +1772,8 @@
                     edgePaths
                         .attr("stroke", arrowColour)
                         .attr("opacity", arrowOpacity)
-                        .attr("marker-end", e => markerFor(arrowColour(e)))
+                        .attr("marker-end", e => aggregateOf(e) ? "none" : markerFor(arrowColour(e)))
+                        .attr("marker-start", e => aggregateOf(e) ? diamondFor(arrowColour(e)) : null)
                         // Unhandled problems are drawn last so they stay on top
                         .sort((a, b) => arrowRank(a) - arrowRank(b));
                 };
@@ -1723,6 +1834,7 @@
                             shown.in_downtime = n.in_downtime;
                             shown.services = n.services;
                             shown.services_notified = n.services_notified;
+                            shown.aggregate = n.aggregate;
                         });
                         applyStates();
                     },
@@ -2092,6 +2204,26 @@
                 icon.append(line, head);
                 return icon;
             };
+            // A dotted line ending in a diamond, for a synthetic host's members
+            const memberSwatch = () => {
+                const ns = "http://www.w3.org/2000/svg";
+                const icon = document.createElementNS(ns, "svg");
+                icon.setAttribute("width", "20");
+                icon.setAttribute("height", "12");
+                icon.setAttribute("viewBox", "-10 -6 20 12");
+                const line = document.createElementNS(ns, "path");
+                line.setAttribute("d", "M-2,0H9");
+                line.setAttribute("stroke", COLOURS.edge);
+                line.setAttribute("stroke-width", "1.4");
+                line.setAttribute("stroke-dasharray", "1.5,3");
+                line.setAttribute("stroke-linecap", "round");
+                const diamond = document.createElementNS(ns, "path");
+                diamond.setAttribute("d", "M-9,0L-5.5,-3L-2,0L-5.5,3Z");
+                diamond.setAttribute("fill", "none");
+                diamond.setAttribute("stroke", COLOURS.edge);
+                icon.append(line, diamond);
+                return icon;
+            };
             [
                 [swatch(COLOURS.up), "up"],
                 [swatch(COLOURS.down), "down"],
@@ -2106,6 +2238,12 @@
                 item.append(icon, text);
                 legend.append(item);
             });
+            const memberLegend = document.createElement("span");
+            memberLegend.className = "topologygraph-legend-members";
+            memberLegend.title = "Dotted, amber while some members are down but enough are up, red when too few are up";
+            memberLegend.append(memberSwatch(), "members of a synthetic host");
+            memberLegend.hidden = true;
+            legend.append(memberLegend);
             // "within the host groups" when several are graphed
             const withinLegend = [...legend.childNodes].find(item => item.textContent === "within the host group").lastChild;
             viewport.append(legend);
@@ -2220,6 +2358,7 @@
                     groupNote.textContent = ignored.length
                         ? "Not offered in the module settings: " + ignored.join(", ") + " \u00b7 "
                         : "";
+                    memberLegend.hidden = !fullData.nodes.some(n => n.aggregate);
                     withinLegend.textContent = graphedGroups.length > 1 ? "within the host groups" : "within the host group";
                     updateGroupPicker();
                     updatePicker();

@@ -135,6 +135,34 @@ check('outside links: asked about the outside hosts only', $requests[3]['vars'],
 check('outside links: the line between them is added', in_array(['source' => 'dmz-1', 'target' => 'backend-1'], $graph['links'], true), true);
 check('outside links: no hosts are added', count($graph['nodes']), 4);
 
+// A synthetic host whose members aren't all drawn: their states are fetched
+$requests = [];
+$agg = GraphSource::fetch(fakeApi([
+    'hosts' => function ($body) {
+        if ($body['filter'] === 'group in host.groups') {
+            return [host('quorum-1', ['groups' => ['web-checks'], 'vars' => ['synthetic' => [
+                'members' => ['w1', 'w2', 'w3'], 'parents' => ['w1', 'w2'], 'mode' => 'quorum'
+            ]]])];
+        }
+        return array_map(function ($name) {
+            return host($name, ['state' => $name === 'w3' ? 1 : 0]);
+        }, $body['filter_vars']['names']);
+    },
+    'dependencies' => [
+        ['attrs' => ['parent_host_name' => 'w1', 'child_host_name' => 'quorum-1', 'child_service_name' => '']],
+        ['attrs' => ['parent_host_name' => 'w2', 'child_host_name' => 'quorum-1', 'child_service_name' => '']]
+    ],
+    'services' => []
+], $requests), 'web-checks', '/host?name=');
+check('members not drawn: one more host request, for them only', [array_column($requests, 'kind'), end($requests)['vars']],
+    [['hosts', 'dependencies', 'hosts', 'dependencies', 'services', 'hosts'], ['names' => ['w3']]]);
+$q = array_values(array_filter($agg['nodes'], function ($n) {
+    return $n['name'] === 'quorum-1';
+}))[0];
+check('members not drawn still count', [$q['aggregate']['up'], $q['aggregate']['down'], $q['aggregate']['needed']], [['w1', 'w2'], ['w3'], 2]);
+check('members not drawn are not added to the graph', count($agg['nodes']), 3);
+check('vars are not sent to the page', array_key_exists('vars', $q), false);
+
 // Hosts failing is an error for the caller
 $thrown = null;
 try {

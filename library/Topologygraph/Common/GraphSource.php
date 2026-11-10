@@ -13,13 +13,17 @@ namespace Icinga\Module\Topologygraph\Common;
  *    between hosts already drawn, never more hosts)
  * 5. the services of all drawn hosts (optional: without permission, or on
  *    error, the graph is built without service details)
+ * 6. only if a synthetic host has members that aren't drawn: their states,
+ *    to tell how many of its members are up
  *
  * The API is passed in as a callable so this can be tested without Icinga.
  */
 final class GraphSource
 {
     const HOST_ATTRS = 'attrs=name&attrs=display_name&attrs=state&attrs=last_check&attrs=groups&attrs=zone'
-        . '&attrs=last_reachable&attrs=acknowledgement&attrs=downtime_depth';
+        . '&attrs=last_reachable&attrs=acknowledgement&attrs=downtime_depth&attrs=vars';
+    // Just enough to tell whether a synthetic host's member is up
+    const MEMBER_ATTRS = 'attrs=name&attrs=state&attrs=last_check';
     const DEPENDENCY_ATTRS = 'attrs=parent_host_name&attrs=child_host_name&attrs=child_service_name';
     const SERVICE_ATTRS = 'attrs=host_name&attrs=state&attrs=last_check&attrs=acknowledgement&attrs=downtime_depth'
         . '&attrs=enable_notifications';
@@ -84,7 +88,18 @@ final class GraphSource
             $services = null;
         }
 
-        return GraphBuilder::build($selection, array_merge($groupHosts, $neighbourHosts), $services, $hostPath);
+        // States of synthetic hosts' members that aren't drawn
+        $fetched = array_merge($groupHosts, $neighbourHosts);
+        $missing = array_values(array_diff(
+            GraphBuilder::aggregateMembers($fetched),
+            self::names($fetched)
+        ));
+        $memberHosts = $missing ? $api(
+            'objects/hosts?' . self::MEMBER_ATTRS,
+            ['filter' => 'host.name in names', 'filter_vars' => ['names' => $missing]]
+        ) : [];
+
+        return GraphBuilder::build($selection, array_merge($fetched, $memberHosts), $services, $hostPath);
     }
 
     /**
