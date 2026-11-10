@@ -104,3 +104,59 @@ test('no synthetic hosts: no legend entry for members', async () => {
         await close();
     }
 });
+
+const drawnNames = page => page.$$eval('.topologygraph-viewport svg a > text', ts => ts.map(t => t.textContent).sort());
+const arrowCount = page => page.$$eval('.topologygraph-viewport svg path[marker-end]', ps => ps.length);
+
+test('collapsing folds the members into their synthetic hosts, which take over their parents', async () => {
+    const {page, errors, close} = await open({data: fixture('quorum')});
+    try {
+        assert.equal(await page.$eval('.topologygraph-collapse', l => l.hidden), false, 'offered with synthetic hosts');
+        await page.click('.topologygraph-collapse input');
+        await page.waitForTimeout(600);
+        assert.deepEqual(await drawnNames(page),
+            ['dc2_master_xray2', 'dc2_worker_xray2', 'gateway.app.internal', 'shop.example.com']);
+        assert.equal(await page.evaluate(() => location.search), '?members=collapsed');
+        const v = await view(page);
+        assert.equal(v.members.length, 0, 'no membership lines left');
+        assert.equal(v.legend, false, 'nor their legend entry');
+        assert.equal(await arrowCount(page), 3, 'shop -> gateway -> worker quorum -> master quorum');
+        assert.equal(v.badges.dc2_worker_xray2.text, '2 of 3 · 2 up', 'the badge keeps the margin');
+        assert.match(v.titles.dc2_worker_xray2, /members collapsed: k8sworker51x2, k8sworker52x2, k8sworker53x2/);
+
+        await page.click('.topologygraph-collapse input');
+        await page.waitForTimeout(600);
+        assert.equal((await drawnNames(page)).length, fixture('quorum').nodes.length, 'unticked: everything back');
+        assert.equal(await page.evaluate(() => location.search), '');
+        assert.deepEqual(errors, []);
+    } finally {
+        await close();
+    }
+});
+
+test('a member with other children stays when collapsed', async () => {
+    const data = fixture('quorum');
+    data.nodes.push({name: 'logs.internal', label: 'logs.internal', state: 0, last_check: 1, member: true, link: '#logs.internal'});
+    data.links.push({source: 'k8sworker52x2', target: 'logs.internal'});
+    const {page, close} = await open({data, query: '?members=collapsed', viewport: {width: 1400, height: 600}});
+    try {
+        const names = await drawnNames(page);
+        assert.ok(names.includes('k8sworker52x2'), 'still needed by logs.internal');
+        assert.ok(!names.includes('k8sworker51x2') && !names.includes('k8sworker53x2'));
+        const v = await view(page);
+        assert.equal(v.members.length, 1, 'its membership line stays too');
+        assert.match(v.titles.dc2_worker_xray2, /members collapsed: k8sworker51x2, k8sworker53x2/);
+    } finally {
+        await close();
+    }
+});
+
+test('no synthetic hosts: nothing to collapse', async () => {
+    const {page, close} = await open({data: fixture('small'), query: '?members=collapsed'});
+    try {
+        assert.equal(await page.$eval('.topologygraph-collapse', l => l.hidden), true);
+        assert.equal((await drawnNames(page)).length, fixture('small').nodes.length);
+    } finally {
+        await close();
+    }
+});

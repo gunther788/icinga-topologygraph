@@ -1119,6 +1119,58 @@
     }
 
     /**
+     * The graph with synthetic hosts' members folded into them: a member is
+     * left out when its only children are synthetic hosts it is a member of,
+     * and those hosts take over its parents (and so on, for members of
+     * members). Members with other children stay, so no dependency is lost.
+     * Returns the new data and, per synthetic host, the members left out.
+     */
+    function collapseMembers(data) {
+        const nodes = data.nodes || [], links = data.links || [];
+        const byName = new Map(nodes.map(n => [n.name, n]));
+        const parentsOf = new Map(nodes.map(n => [n.name, []]));
+        const childrenOf = new Map(nodes.map(n => [n.name, []]));
+        links.forEach(l => {
+            if (!byName.has(l.source) || !byName.has(l.target)) return;
+            parentsOf.get(l.target).push(l.source);
+            childrenOf.get(l.source).push(l.target);
+        });
+        const memberOf = (member, host) => {
+            const aggregate = (byName.get(host) || {}).aggregate;
+            return !!aggregate && aggregate.members.includes(member);
+        };
+        const hidden = new Set(nodes
+            .filter(n => childrenOf.get(n.name).length && childrenOf.get(n.name).every(c => memberOf(n.name, c)))
+            .map(n => n.name));
+        if (!hidden.size) return {data, folded: new Map()};
+
+        // The visible hosts a host's parents stand for
+        const visibleParents = (name, seen = new Set()) => {
+            const result = [];
+            parentsOf.get(name).forEach(parent => {
+                if (seen.has(parent)) return;
+                seen.add(parent);
+                if (hidden.has(parent)) result.push(...visibleParents(parent, seen));
+                else result.push(parent);
+            });
+            return result;
+        };
+        const folded = new Map();
+        const newLinks = [];
+        nodes.filter(n => !hidden.has(n.name)).forEach(n => {
+            const members = parentsOf.get(n.name).filter(p => hidden.has(p));
+            if (members.length) folded.set(n.name, members);
+            [...new Set(visibleParents(n.name))]
+                .filter(parent => parent !== n.name)
+                .forEach(parent => newLinks.push({source: parent, target: n.name}));
+        });
+        return {
+            data: Object.assign({}, data, {nodes: nodes.filter(n => !hidden.has(n.name)), links: newLinks}),
+            folded
+        };
+    }
+
+    /**
      * The part of the graph above some hosts: those hosts, their parents,
      * their parents' parents and so on, with the dependencies between them.
      */
@@ -1153,6 +1205,7 @@
             hosts: params.getAll("host"),
             hostgroups: params.getAll("hostgroup"),
             notifiedOnly: params.get("services") === "notified",
+            collapsed: params.get("members") === "collapsed",
             layout: ["elk", "hybrid"].includes(params.get("layout")) ? params.get("layout") : "standard"
         };
     };
@@ -1162,10 +1215,12 @@
         url.searchParams.delete("host");
         url.searchParams.delete("hostgroup");
         url.searchParams.delete("services");
+        url.searchParams.delete("members");
         url.searchParams.delete("layout");
         state.hosts.forEach(name => url.searchParams.append("host", name));
         (state.hostgroups || []).forEach(name => url.searchParams.append("hostgroup", name));
         if (state.notifiedOnly) url.searchParams.append("services", "notified");
+        if (state.collapsed) url.searchParams.append("members", "collapsed");
         if (state.layout && state.layout !== "standard") url.searchParams.append("layout", state.layout);
         if (url.href !== window.location.href) {
             // Replace rather than push: Icinga keeps its own history entries,
@@ -1478,8 +1533,10 @@
             let selectedGroups = urlState.hostgroups; // chosen host groups (none: the default)
             const selectionNames = () => selected;
             let notifiedOnly = urlState.notifiedOnly; // ignore services with notifications disabled
+            let collapsed = urlState.collapsed; // synthetic hosts' members folded into them
+            let folded = new Map(); // synthetic host -> members left out, when collapsed
             let layout = urlState.layout; // "standard", "elk" or "hybrid"
-            const updateUrl = () => writeUrlState({hosts: selected, hostgroups: selectedGroups, notifiedOnly, layout}, container);
+            const updateUrl = () => writeUrlState({hosts: selected, hostgroups: selectedGroups, notifiedOnly, collapsed, layout}, container);
             // The service summary to show: all services, or only those with
             // notifications enabled (falls back if the server doesn't send it)
             const serviceSummary = d => notifiedOnly && d.services_notified !== undefined ? d.services_notified : d.services;
@@ -1490,7 +1547,11 @@
             // everything above them
             const visibleData = () => {
                 const names = selectionNames();
-                return names.length ? subsetAbove(fullData, names) : fullData;
+                let base = fullData;
+                folded = new Map();
+                if (collapsed) ({data: base, folded} = collapseMembers(fullData));
+                const shown = names.filter(name => base.nodes.some(n => n.name === name));
+                return shown.length ? subsetAbove(base, shown) : base;
             };
 
             // Re-layouts animate from the previous positions (unless the
@@ -1645,7 +1706,10 @@
                     .classed("topologygraph-aggregate", e => !!aggregateOf(e))
                     .attr("stroke-width", e => aggregateOf(e) ? 1.4 : null)
                     .attr("stroke-dasharray", e => aggregateOf(e) ? "1.5,3" : null)
-                    .attr("stroke-linecap", e => aggregateOf(e) ? "round" : null)
+                    .attr("stroke-linecap", e => aggregateOf(e) ? "round" : null);
+                // The legend explains membership lines while any are drawn
+                memberLegend.hidden = !geo.edges.some(e => aggregateOf(e));
+                edgePaths
                     // ELK routes arrows around hosts (points); the standard
                     // layout draws a smooth curve between the two ends
                     // Drawn from the child to the parent, so the arrowhead
@@ -1733,6 +1797,7 @@
                         d.zone ? "zone: " + d.zone : null,
                         d.aggregate ? d.aggregate.mode + ": needs " + aggregateText(d.aggregate) : null,
                         d.aggregate && d.aggregate.down.length ? "members down: " + d.aggregate.down.join(", ") : null,
+                        folded.has(d.name) ? "members collapsed: " + folded.get(d.name).join(", ") : null,
                         d.aggregate && d.aggregate.unknown.length ? "members unknown or pending: " + d.aggregate.unknown.join(", ") : null,
                         d.inGroup ? null : graphedGroups.length > 1
                             ? "not in the host groups " + graphedGroups.join(", ")
@@ -2095,6 +2160,21 @@
             });
             notifiedToggle.append(notifiedBox, " Notified services only");
 
+            // Option: fold synthetic hosts' members into them
+            const collapseToggle = document.createElement("label");
+            collapseToggle.className = "topologygraph-toggle topologygraph-collapse";
+            collapseToggle.title = "Show synthetic hosts without their members, to save space";
+            collapseToggle.hidden = true;
+            const collapseBox = document.createElement("input");
+            collapseBox.type = "checkbox";
+            collapseBox.checked = collapsed;
+            collapseBox.addEventListener("change", () => {
+                collapsed = collapseBox.checked;
+                updateUrl();
+                draw(null);
+            });
+            collapseToggle.append(collapseBox, " Collapse members");
+
             // Layout engine: the module's own, ELK (loaded on first use), or the
             // hybrid of the two (ELK, with the rightmost column wrapped)
             const layoutPicker = document.createElement("select");
@@ -2113,7 +2193,7 @@
                 draw(null);
             });
 
-            controls.append(layoutPicker, notifiedToggle, groupButton, pickerButton);
+            controls.append(layoutPicker, notifiedToggle, collapseToggle, groupButton, pickerButton);
             viewport.append(panel, groupPanel);
 
             const isFullscreen = () =>
@@ -2358,7 +2438,8 @@
                     groupNote.textContent = ignored.length
                         ? "Not offered in the module settings: " + ignored.join(", ") + " \u00b7 "
                         : "";
-                    memberLegend.hidden = !fullData.nodes.some(n => n.aggregate);
+                    // Only offered when there is something to collapse
+                    collapseToggle.hidden = !fullData.nodes.some(n => n.aggregate);
                     withinLegend.textContent = graphedGroups.length > 1 ? "within the host groups" : "within the host group";
                     updateGroupPicker();
                     updatePicker();

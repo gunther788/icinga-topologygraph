@@ -77,7 +77,9 @@ final class GraphExplain
             } else {
                 foreach ($children[$name] ?? [] as $child) {
                     if ($isMember($child)) {
-                        $why[] = 'parent of ' . $child;
+                        $aggregate = $nodes[$child]['aggregate'] ?? null;
+                        $why[] = ($aggregate && in_array($name, $aggregate['members'], true) ? 'member of ' : 'parent of ')
+                            . $child;
                     }
                 }
                 foreach ($parents[$name] ?? [] as $parent) {

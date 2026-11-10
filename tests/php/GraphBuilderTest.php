@@ -67,6 +67,20 @@ $both = GraphBuilder::select(
 check('select: several groups are all members', array_keys($both['members']), ['probe-a', 'web-1']);
 check('select: neighbours of any of them', $both['names'], ['probe-a', 'web-1', 'db-1']);
 
+// --- addAggregateMembers() ---------------------------------------------------
+
+$quorumHost = host('quorum-1', ['groups' => ['synthetic'], 'vars' => ['synthetic' => [
+    'members' => ['w1', 'w2', 'quorum-1', ''], 'mode' => 'quorum'   // no parents at all
+]]]);
+$outsideQuorum = host('quorum-2', ['vars' => ['synthetic' => ['members' => ['w9']]]]);
+$sel = GraphBuilder::select([$quorumHost, $outsideQuorum], [dependency('w1', 'quorum-1')], 'synthetic');
+$withMembers = GraphBuilder::addAggregateMembers($sel, [$quorumHost, $outsideQuorum]);
+check('members: drawn without being parents', $withMembers['names'], ['quorum-1', 'w1', 'w2']);
+check('members: linked like parents, once each', $withMembers['links'], [
+    ['source' => 'w1', 'target' => 'quorum-1'], ['source' => 'w2', 'target' => 'quorum-1']
+]);
+check('members: only of synthetic hosts in the groups', in_array('w9', $withMembers['names'], true), false);
+
 // --- addLinksAmong() --------------------------------------------------------
 
 $among = GraphBuilder::addLinksAmong($selection, [
