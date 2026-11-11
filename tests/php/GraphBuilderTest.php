@@ -67,6 +67,33 @@ $both = GraphBuilder::select(
 check('select: several groups are all members', array_keys($both['members']), ['probe-a', 'web-1']);
 check('select: neighbours of any of them', $both['names'], ['probe-a', 'web-1', 'db-1']);
 
+// --- redundancy groups --------------------------------------------------------
+
+function grouped($parent, $child, $group)
+{
+    $d = dependency($parent, $child);
+    $d['attrs']['redundancy_group'] = $group;
+    return $d;
+}
+$red = GraphBuilder::select(
+    [host('app', ['groups' => ['synthetic']])],
+    [grouped('svc-dc1', 'app', 'svc'), grouped('svc-dc2', 'app', ' svc '), dependency('gw', 'app'),
+        grouped('gw', 'app', 'other'),        // also required without a group: stays required
+        grouped('db', 'app', '')],             // empty: required
+    'synthetic'
+);
+check('redundancy group kept on the link', $red['links'], [
+    ['source' => 'svc-dc1', 'target' => 'app', 'redundancy_group' => 'svc'],
+    ['source' => 'svc-dc2', 'target' => 'app', 'redundancy_group' => 'svc'],
+    ['source' => 'gw', 'target' => 'app'],
+    ['source' => 'db', 'target' => 'app']
+]);
+$redAmong = GraphBuilder::addLinksAmong(
+    ['names' => ['a', 'b', 'c'], 'members' => [], 'links' => [['source' => 'a', 'target' => 'b', 'redundancy_group' => 'g']]],
+    [grouped('c', 'b', 'g')]
+);
+check('redundancy groups kept when adding links among drawn hosts', array_column($redAmong['links'], 'redundancy_group'), ['g', 'g']);
+
 // --- addAggregateMembers() ---------------------------------------------------
 
 $quorumHost = host('quorum-1', ['groups' => ['synthetic'], 'vars' => ['synthetic' => [

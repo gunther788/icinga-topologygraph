@@ -43,6 +43,13 @@ group, the host groups offered on the page, and the refresh interval.
 - **Arrows:** blue between hosts of the graphed groups, gray when a host outside them is at either end (a dependency
   that ties other hosts into the graph). Both are drawn at the same width, opacity and lightness. An arrow from a host that is down or unreachable takes that host's colour
   either way.
+- **Redundancy groups:** dependencies with Icinga's `redundancy_group` mean the child needs any one parent of the
+  group, not all of them. Each of those parents gets its own dashed arrow, and the arrows fork off a small hollow
+  circle next to the child, so a pair of symmetric services in two data centres reads as "either one". A parent
+  without a redundancy group keeps a plain arrow: it is required. The colours show how much redundancy is left:
+  an arrow to a parent that is down is amber while another parent of the group is up, and red when none is. The
+  hover text lists each group, for example `redundancy group svc: 1 of 2 parents up (down: svc-dc1)`. Alternative
+  parents are never boxed together, so each keeps its own arrow.
 - **Synthetic hosts with members:** a host with `vars.synthetic.members` aggregates those hosts, in the mode set by
   `vars.synthetic.mode`. Its members meet it on a dotted line ending in a hollow diamond, with no arrowhead, so
   membership doesn't read as a dependency. Members are drawn whether or not they are also parents: the line

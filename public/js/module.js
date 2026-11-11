@@ -115,7 +115,7 @@
             n.name, n.label, !!(n.member !== undefined ? n.member : n.synthetic), n.link,
             n.aggregate ? [n.aggregate.mode, n.aggregate.needed, n.aggregate.members] : null
         ]).sort();
-        const links = (data.links || []).map(l => [l.source, l.target]).sort();
+        const links = (data.links || []).map(l => [l.source, l.target, l.redundancy_group || ""]).sort();
         return JSON.stringify([nodes, links]);
     }
 
@@ -189,6 +189,17 @@
         }
 
         return {columns, layer, position, layerCount};
+    }
+
+    /**
+     * Track the redundancy group of the links drawn as one edge: kept only
+     * while every link behind the edge is in the same group (then the edge
+     * is one of the alternatives; otherwise its parents are required).
+     */
+    function mergeRedundancy(edge, link) {
+        const group = link.redundancy_group || null;
+        if (!("redundancy" in edge)) edge.redundancy = group;
+        else if (edge.redundancy !== group) edge.redundancy = null;
     }
 
     /**
@@ -275,9 +286,12 @@
             parentsOf.get(l.target).push(l.source);
         });
         const rightmost = new Set(columns[0]);
+        // Alternative parents (in a redundancy group) each keep their own
+        // arrow, so they are never boxed with others
+        const alternative = new Set(validLinks.filter(l => l.redundancy_group).map(l => l.source));
         // Hosts further left with the same parents and children share a box
         const siblingOf = new Map();
-        siblingGroups(nodes.map(n => n.name), parentsOf, childrenOf).forEach(names => {
+        siblingGroups(nodes.map(n => n.name).filter(name => !alternative.has(name)), parentsOf, childrenOf).forEach(names => {
             const group = {names, children: childrenOf.get(names[0]).slice()};
             names.forEach(name => siblingOf.set(name, group));
         });
@@ -303,7 +317,7 @@
         // Rightmost hosts grouped by their exact set of children
         const groupsByKey = new Map();
         columns[0].forEach(name => {
-            const key = childrenOf.get(name).slice().sort().join("\0");
+            const key = childrenOf.get(name).slice().sort().join("\0") + (alternative.has(name) ? "\u0002" + name : "");
             if (!groupsByKey.has(key)) groupsByKey.set(key, []);
             groupsByKey.get(key).push(name);
         });
@@ -314,7 +328,7 @@
             if (key === "") {
                 looseNames = names;
             } else {
-                rawGroups.push({names, children: key.split("\0")});
+                rawGroups.push({names, children: childrenOf.get(names[0]).slice()});
             }
         });
 
@@ -584,7 +598,10 @@
             validLinks.forEach(l => {
                 const from = boxOf.get(l.source) || l.source, to = siblingOf.has(l.target) ? boxOf.get(l.target) : l.target;
                 if (!edgeMap.has(from)) edgeMap.set(from, new Map());
-                if (edgeMap.get(from).has(to)) return;
+                if (edgeMap.get(from).has(to)) {
+                    mergeRedundancy(edgeMap.get(from).get(to), l);
+                    return;
+                }
                 const p = coords.get(l.source);
                 const children = typeof to === "string" ? [to] : to.names;
                 edgeMap.get(from).set(to, {
@@ -596,6 +613,7 @@
                     children,
                     parents: typeof from === "string" ? [from] : from.names
                 });
+                mergeRedundancy(edgeMap.get(from).get(to), l);
             });
             const edges = [];
             edgeMap.forEach(targets => targets.forEach(edge => edges.push(edge)));
@@ -867,10 +885,12 @@
                 hasParent.add(l.target);
             });
 
-            // Hosts without parents, grouped by their children
+            // Hosts without parents, grouped by their children; alternative
+            // parents (in a redundancy group) each keep their own arrow
+            const alternative = new Set(validLinks.filter(l => l.redundancy_group).map(l => l.source));
             const groupByKey = new Map();
             nodes.filter(n => !hasParent.has(n.name)).forEach(n => {
-                const key = childrenOf.get(n.name).slice().sort().join("\0");
+                const key = childrenOf.get(n.name).slice().sort().join("\0") + (alternative.has(n.name) ? "\u0002" + n.name : "");
                 if (!groupByKey.has(key)) {
                     groupByKey.set(key, {id: "group:" + groupByKey.size, names: [], children: childrenOf.get(n.name).slice()});
                 }
@@ -887,7 +907,7 @@
             });
             // Hosts further left with the same parents and children: one
             // node the size of their box, arrows in on the right, out on the left
-            const siblings = siblingGroups(nodes.map(n => n.name), parentsOf, childrenOf).map((names, i) => ({
+            const siblings = siblingGroups(nodes.map(n => n.name).filter(name => !alternative.has(name)), parentsOf, childrenOf).map((names, i) => ({
                 id: "siblings:" + i, names, children: childrenOf.get(names[0]).slice(),
                 width: BOX_PAD_X + Math.max(...names.map(name => labelWidth.get(name))) + LABEL_OFFSET + 5 + BOX_PAD_X,
                 height: names.length * ROW + 4
@@ -905,6 +925,7 @@
                 if (!arrows.has(id)) {
                     arrows.set(id, {id, from, to, children: siblingOf.has(l.target) ? siblingOf.get(l.target).names : [l.target]});
                 }
+                mergeRedundancy(arrows.get(id), l);
             });
 
             const layoutOptions = {
@@ -1019,6 +1040,7 @@
                         source: points[0],
                         target: end,
                         child: a.children[0],
+                        redundancy: a.redundancy,
                         children: a.children,
                         // A box's arrow belongs to all of its hosts
                         parents: from ? from.names : [a.from],
@@ -1162,7 +1184,13 @@
             if (members.length) folded.set(n.name, members);
             [...new Set(visibleParents(n.name))]
                 .filter(parent => parent !== n.name)
-                .forEach(parent => newLinks.push({source: parent, target: n.name}));
+                .forEach(parent => {
+                    // A direct link keeps its redundancy group
+                    const direct = links.find(l => l.source === parent && l.target === n.name);
+                    newLinks.push(direct && direct.redundancy_group
+                        ? {source: parent, target: n.name, redundancy_group: direct.redundancy_group}
+                        : {source: parent, target: n.name});
+                });
         });
         return {
             data: Object.assign({}, data, {nodes: nodes.filter(n => !hidden.has(n.name)), links: newLinks}),
@@ -1400,6 +1428,25 @@
                     .attr("orient", "auto");
                 diamond.append("path")
                     .attr("d", "M0.6,0L6,-3.4L11.4,0L6,3.4Z")
+                    .attr("fill", background || "#fff")
+                    .attr("stroke", colour)
+                    .attr("stroke-width", 1.2);
+            });
+            // A small hollow circle where a child's alternative parents fork off
+            const forkFor = colour => "url(#topologygraph-fork-" + Math.max(0, diamondColours.indexOf(colour)) + ")";
+            diamondColours.forEach((colour, i) => {
+                const fork = defs.append("marker")
+                    .attr("id", "topologygraph-fork-" + i)
+                    .attr("viewBox", "-4 -4 8 8")
+                    .attr("markerUnits", "userSpaceOnUse")
+                    .attr("markerWidth", 8)
+                    .attr("markerHeight", 8)
+                    // Just clear of the dot and its service ring
+                    .attr("refX", -13)
+                    .attr("refY", 0)
+                    .attr("orient", "auto");
+                fork.append("circle")
+                    .attr("r", 3.2)
                     .attr("fill", background || "#fff")
                     .attr("stroke", colour)
                     .attr("stroke-width", 1.2);
@@ -1658,22 +1705,52 @@
                     return aggregate && e.parents.every(p => aggregate.members.includes(p)) ? aggregate : null;
                 };
                 const normalColour = e => outside(e) ? COLOURS.edgeOutside : COLOURS.edge;
+
+                // Redundancy groups: a child needs any one parent of a group.
+                // Per child and group, its parents in that group.
+                const redundancy = new Map();
+                links.forEach(l => {
+                    if (!l.redundancy_group || !nodeByName.has(l.source) || !nodeByName.has(l.target)) return;
+                    if (!redundancy.has(l.target)) redundancy.set(l.target, new Map());
+                    const groups = redundancy.get(l.target);
+                    if (!groups.has(l.redundancy_group)) groups.set(l.redundancy_group, []);
+                    groups.get(l.redundancy_group).push(l.source);
+                });
+                const parentUp = name => stateName(nodeByName.get(name)) === "up";
+                // ok, or "degraded" (this branch's parents are down, others in
+                // the group are up), or "failed" (no parent of the group is up)
+                const redundancyHealth = e => {
+                    const groupParents = new Set();
+                    (e.children || [e.child]).forEach(c => {
+                        ((redundancy.get(c) || new Map()).get(e.redundancy) || []).forEach(p => groupParents.add(p));
+                    });
+                    if (![...groupParents].some(parentUp)) return "failed";
+                    return e.parents.some(parentUp) ? "ok" : "degraded";
+                };
+                const forkOf = e => !aggregateOf(e) && e.redundancy ? e.redundancy : null;
                 const arrowColour = e => {
                     const aggregate = aggregateOf(e);
                     if (aggregate) {
                         const health = aggregateHealth(aggregate);
                         return health === "failed" ? COLOURS.down : health === "degraded" ? COLOURS.warning : normalColour(e);
                     }
+                    if (forkOf(e)) {
+                        const health = redundancyHealth(e);
+                        if (health === "failed") return COLOURS.down;
+                        if (health === "degraded") return COLOURS.warning;
+                    }
                     return isProblem(childOf(e)) ? stateColor(childOf(e)) : normalColour(e);
                 };
                 const arrowOpacity = e => {
                     const aggregate = aggregateOf(e);
                     if (aggregate) return aggregateHealth(aggregate) === "ok" ? 0.5 : 0.85;
+                    if (forkOf(e) && redundancyHealth(e) !== "ok") return 0.85;
                     return !isProblem(childOf(e)) ? 0.5 : isHandled(childOf(e)) ? 0.35 : 0.85;
                 };
                 const arrowRank = e => {
                     const aggregate = aggregateOf(e);
                     if (aggregate) return {ok: 0, degraded: 1, failed: 2}[aggregateHealth(aggregate)];
+                    if (forkOf(e) && redundancyHealth(e) !== "ok") return {degraded: 1, failed: 2}[redundancyHealth(e)];
                     return !isProblem(childOf(e)) ? 0 : isHandled(childOf(e)) ? 1 : 2;
                 };
 
@@ -1704,11 +1781,15 @@
                     // Membership lines: thinner and dotted, a diamond at the
                     // synthetic host instead of an arrowhead
                     .classed("topologygraph-aggregate", e => !!aggregateOf(e))
+                    // Alternatives (a redundancy group): dashed, forking off a
+                    // small circle at the child
+                    .classed("topologygraph-redundant", e => !!forkOf(e))
                     .attr("stroke-width", e => aggregateOf(e) ? 1.4 : null)
-                    .attr("stroke-dasharray", e => aggregateOf(e) ? "1.5,3" : null)
+                    .attr("stroke-dasharray", e => aggregateOf(e) ? "1.5,3" : forkOf(e) ? "6,3" : null)
                     .attr("stroke-linecap", e => aggregateOf(e) ? "round" : null);
                 // The legend explains membership lines while any are drawn
                 memberLegend.hidden = !geo.edges.some(e => aggregateOf(e));
+                redundancyLegend.hidden = !geo.edges.some(e => forkOf(e));
                 edgePaths
                     // ELK routes arrows around hosts (points); the standard
                     // layout draws a smooth curve between the two ends
@@ -1798,6 +1879,11 @@
                         d.aggregate ? d.aggregate.mode + ": needs " + aggregateText(d.aggregate) : null,
                         d.aggregate && d.aggregate.down.length ? "members down: " + d.aggregate.down.join(", ") : null,
                         folded.has(d.name) ? "members collapsed: " + folded.get(d.name).join(", ") : null,
+                        ...[...(redundancy.get(d.name) || new Map())].map(([group, parents]) => {
+                            const down = parents.filter(p => !parentUp(p));
+                            return "redundancy group " + group + ": " + (parents.length - down.length) + " of "
+                                + parents.length + " parents up" + (down.length ? " (down: " + down.join(", ") + ")" : "");
+                        }),
                         d.aggregate && d.aggregate.unknown.length ? "members unknown or pending: " + d.aggregate.unknown.join(", ") : null,
                         d.inGroup ? null : graphedGroups.length > 1
                             ? "not in the host groups " + graphedGroups.join(", ")
@@ -1838,7 +1924,8 @@
                         .attr("stroke", arrowColour)
                         .attr("opacity", arrowOpacity)
                         .attr("marker-end", e => aggregateOf(e) ? "none" : markerFor(arrowColour(e)))
-                        .attr("marker-start", e => aggregateOf(e) ? diamondFor(arrowColour(e)) : null)
+                        .attr("marker-start", e => aggregateOf(e) ? diamondFor(arrowColour(e))
+                            : forkOf(e) ? forkFor(arrowColour(e)) : null)
                         // Unhandled problems are drawn last so they stay on top
                         .sort((a, b) => arrowRank(a) - arrowRank(b));
                 };
@@ -2318,12 +2405,37 @@
                 item.append(icon, text);
                 legend.append(item);
             });
+            // Dashed, forking off a circle: any one of these parents will do
+            const forkSwatch = () => {
+                const ns = "http://www.w3.org/2000/svg";
+                const icon = document.createElementNS(ns, "svg");
+                icon.setAttribute("width", "20");
+                icon.setAttribute("height", "12");
+                icon.setAttribute("viewBox", "-10 -6 20 12");
+                const line = document.createElementNS(ns, "path");
+                line.setAttribute("d", "M-4,0L6,-4M-4,0L6,4");
+                line.setAttribute("stroke", COLOURS.edge);
+                line.setAttribute("stroke-width", "1.4");
+                line.setAttribute("stroke-dasharray", "3,2");
+                line.setAttribute("fill", "none");
+                const circle = document.createElementNS(ns, "circle");
+                circle.setAttribute("cx", "-6.5");
+                circle.setAttribute("r", "2.5");
+                circle.setAttribute("fill", "none");
+                circle.setAttribute("stroke", COLOURS.edge);
+                icon.append(line, circle);
+                return icon;
+            };
+            const redundancyLegend = document.createElement("span");
+            redundancyLegend.className = "topologygraph-legend-redundancy";
+            redundancyLegend.append(forkSwatch(), "any one of these parents");
+            redundancyLegend.hidden = true;
             const memberLegend = document.createElement("span");
             memberLegend.className = "topologygraph-legend-members";
             memberLegend.title = "Dotted, amber while some members are down but enough are up, red when too few are up";
             memberLegend.append(memberSwatch(), "members of a synthetic host");
             memberLegend.hidden = true;
-            legend.append(memberLegend);
+            legend.append(memberLegend, redundancyLegend);
             // "within the host groups" when several are graphed
             const withinLegend = [...legend.childNodes].find(item => item.textContent === "within the host group").lastChild;
             viewport.append(legend);

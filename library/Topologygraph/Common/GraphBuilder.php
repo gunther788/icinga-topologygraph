@@ -50,7 +50,7 @@ final class GraphBuilder
             if (! isset($members[$parent]) && ! isset($members[$child])) {
                 continue;
             }
-            $links[$parent . "\0" . $child] = ['source' => $parent, 'target' => $child];
+            self::putLink($links, $parent, $child, $attrs);
         }
 
         $names = $members;
@@ -137,7 +137,7 @@ final class GraphBuilder
             if ($parent === $child || ! isset($drawn[$parent]) || ! isset($drawn[$child])) {
                 continue;
             }
-            $links[$parent . "\0" . $child] = ['source' => $parent, 'target' => $child];
+            self::putLink($links, $parent, $child, $attrs);
         }
         $selection['links'] = array_values($links);
 
@@ -209,6 +209,27 @@ final class GraphBuilder
      *
      * @return array ['nodes' => [...], 'links' => [...]]
      */
+    /**
+     * Add the link parent -> child for a dependency, keeping its redundancy
+     * group (the child needs any one parent of the group, not all of them).
+     * If two dependencies link the same hosts, one without a redundancy group
+     * wins: that parent is required.
+     */
+    private static function putLink(array &$links, $parent, $child, array $attrs)
+    {
+        $key = $parent . "\0" . $child;
+        $group = trim((string) ($attrs['redundancy_group'] ?? ''));
+        $link = ['source' => $parent, 'target' => $child];
+        if ($group !== '') {
+            $link['redundancy_group'] = $group;
+        }
+        if (! isset($links[$key])) {
+            $links[$key] = $link;
+        } elseif ($group === '') {
+            unset($links[$key]['redundancy_group']);
+        }
+    }
+
     /** Host variable holding a synthetic host's members and mode */
     const AGGREGATE_VAR = 'synthetic';
 
