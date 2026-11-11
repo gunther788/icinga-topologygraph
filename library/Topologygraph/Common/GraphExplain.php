@@ -106,13 +106,18 @@ final class GraphExplain
 
         $links = [];
         foreach ($graph['links'] as $link) {
-            $links[] = [
+            $entry = [
                 'parent' => $link['source'],
                 'child'  => $link['target'],
                 'found'  => $isMember($link['source']) || $isMember($link['target'])
                     ? 'touches a member'
                     : 'between two outside hosts'
             ];
+            if (! empty($link['redundancy_group'])) {
+                // Any one parent of the group will do
+                $entry['redundancy_group'] = $link['redundancy_group'];
+            }
+            $links[] = $entry;
         }
 
         // Selected hosts that aren't in the graph, and why

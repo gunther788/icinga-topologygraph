@@ -25,7 +25,8 @@ final class GraphSource
         . '&attrs=last_reachable&attrs=acknowledgement&attrs=downtime_depth&attrs=vars';
     // Just enough to tell whether a synthetic host's member is up
     const MEMBER_ATTRS = 'attrs=name&attrs=state&attrs=last_check';
-    const DEPENDENCY_ATTRS = 'attrs=parent_host_name&attrs=child_host_name&attrs=child_service_name';
+    const DEPENDENCY_ATTRS = 'attrs=parent_host_name&attrs=child_host_name&attrs=child_service_name'
+        . '&attrs=redundancy_group';
     const SERVICE_ATTRS = 'attrs=host_name&attrs=state&attrs=last_check&attrs=acknowledgement&attrs=downtime_depth'
         . '&attrs=enable_notifications';
 

@@ -1,0 +1,140 @@
+{
+ "nodes": [
+  {
+   "name": "probe-shop",
+   "label": "probe-shop",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#probe-shop"
+  },
+  {
+   "name": "probe-blog",
+   "label": "probe-blog",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#probe-blog"
+  },
+  {
+   "name": "shop",
+   "label": "shop",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#shop"
+  },
+  {
+   "name": "blog",
+   "label": "blog",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#blog"
+  },
+  {
+   "name": "gateway",
+   "label": "gateway",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#gateway"
+  },
+  {
+   "name": "db",
+   "label": "db",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#db"
+  },
+  {
+   "name": "svc-dc1",
+   "label": "svc-dc1",
+   "state": 1,
+   "last_check": 1,
+   "member": true,
+   "link": "#svc-dc1"
+  },
+  {
+   "name": "svc-dc2",
+   "label": "svc-dc2",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#svc-dc2"
+  },
+  {
+   "name": "cache-dc1",
+   "label": "cache-dc1",
+   "state": 1,
+   "last_check": 1,
+   "member": true,
+   "link": "#cache-dc1"
+  },
+  {
+   "name": "cache-dc2",
+   "label": "cache-dc2",
+   "state": 1,
+   "last_check": 1,
+   "member": true,
+   "link": "#cache-dc2"
+  }
+ ],
+ "links": [
+  {
+   "source": "shop",
+   "target": "probe-shop"
+  },
+  {
+   "source": "blog",
+   "target": "probe-blog"
+  },
+  {
+   "source": "svc-dc1",
+   "target": "shop",
+   "redundancy_group": "svc"
+  },
+  {
+   "source": "svc-dc2",
+   "target": "shop",
+   "redundancy_group": "svc"
+  },
+  {
+   "source": "gateway",
+   "target": "shop"
+  },
+  {
+   "source": "svc-dc1",
+   "target": "blog",
+   "redundancy_group": "svc"
+  },
+  {
+   "source": "svc-dc2",
+   "target": "blog",
+   "redundancy_group": "svc"
+  },
+  {
+   "source": "gateway",
+   "target": "blog"
+  },
+  {
+   "source": "cache-dc1",
+   "target": "blog",
+   "redundancy_group": "cache"
+  },
+  {
+   "source": "cache-dc2",
+   "target": "blog",
+   "redundancy_group": "cache"
+  },
+  {
+   "source": "db",
+   "target": "svc-dc1"
+  },
+  {
+   "source": "db",
+   "target": "svc-dc2"
+  }
+ ]
+}
