@@ -36,7 +36,8 @@ group, the host groups offered on the page, and the refresh interval.
 - **Boxes further left:** hosts that have the same parents and the same children as each other, at least two of
   them, are also drawn together in a box. The box then has one arrow to each parent and each child has one arrow
   to the box, instead of an arrow per host, so a farm of identical web or app servers reads as one step in the
-  chain. An arrow from a box takes the colour of the worst host in it.
+  chain. An arrow from a box turns red (or purple) when every host in it is down, and is dashed in that colour
+  while only some are, so one worker down in a pool doesn't look like the whole pool failing.
 - **Colours:** dots and names show host state: green for up, red for down, purple for unreachable (down only
   because a parent is down), blue for pending, grey for unknown. Problems that are acknowledged or in downtime are
   faded.

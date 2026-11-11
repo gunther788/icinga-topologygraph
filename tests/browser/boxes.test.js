@@ -26,7 +26,7 @@ const drawing = page => page.evaluate(() => {
     const arrows = [...svg.querySelectorAll('path[marker-end]')].map(path => {
         const length = path.getTotalLength();
         const end = path.getPointAtLength(length), start = path.getPointAtLength(0);
-        return {start: {x: start.x, y: start.y}, end: {x: end.x, y: end.y}, stroke: path.getAttribute('stroke'),
+        return {start: {x: start.x, y: start.y}, end: {x: end.x, y: end.y}, stroke: path.getAttribute('stroke'), dashes: path.getAttribute('stroke-dasharray'),
             opacity: path.style.opacity};
     });
     return {hosts, boxes, arrows};
@@ -70,16 +70,36 @@ for (const layout of ['standard', 'elk', 'hybrid']) {
     });
 }
 
-test('a down host in a box colours the arrow from the box up to its parent', async () => {
+test('some hosts of a box down: the arrow up is dashed in the problem colour; all down: solid', async () => {
     const data = fixture('siblings');
     data.nodes.find(n => n.name === 'app-2').state = 1;
-    const {page, close} = await open({data});
+    const {page, server, close} = await open({data, clock: true});
+    const refresh = async () => {
+        await page.clock.runFor(15000);
+        await page.waitForTimeout(200);
+    };
     try {
-        const d = await drawing(page);
-        const arrows = toParents(d, boxWith(d, SIBLINGS[0]));
+        let d = await drawing(page);
+        let arrows = toParents(d, boxWith(d, SIBLINGS[0]));
         assert.equal(arrows.length, 1);
-        assert.equal(arrows[0].stroke, '#ff5566');
+        assert.deepEqual([arrows[0].stroke, arrows[0].dashes], ['#ff5566', '4,3'], 'one of three down: dashed red');
         assert.ok(fromChildren(d, boxWith(d, SIBLINGS[0])).every(a => a.stroke !== '#ff5566'), 'arrows from its children are not');
+
+        const all = JSON.parse(JSON.stringify(data));
+        all.nodes.filter(n => /^app-/.test(n.name)).forEach(n => { n.state = 1; });
+        server.data = all;
+        await refresh();
+        d = await drawing(page);
+        arrows = toParents(d, boxWith(d, SIBLINGS[0]));
+        assert.deepEqual([arrows[0].stroke, arrows[0].dashes], ['#ff5566', null], 'all down: solid red');
+
+        const none = JSON.parse(JSON.stringify(data));
+        none.nodes.find(n => n.name === 'app-2').state = 0;
+        server.data = none;
+        await refresh();
+        d = await drawing(page);
+        arrows = toParents(d, boxWith(d, SIBLINGS[0]));
+        assert.deepEqual([arrows[0].stroke, arrows[0].dashes], ['#adb3bc', null], 'all up: solid, normal colour (gray: outside the group)');
     } finally {
         await close();
     }
