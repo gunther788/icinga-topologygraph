@@ -1728,6 +1728,15 @@
                     return e.parents.some(parentUp) ? "ok" : "degraded";
                 };
                 const forkOf = e => !aggregateOf(e) && e.redundancy ? e.redundancy : null;
+                // An ordinary arrow from a box with some, but not all, of its
+                // hosts down: dashed in the problem colour (solid when all are)
+                const partlyDown = e => {
+                    if (aggregateOf(e) || forkOf(e)) return false;
+                    const children = childrenOfEdge(e);
+                    const down = children.filter(c => isProblem(c)).length;
+                    return children.length > 1 && down > 0 && down < children.length;
+                };
+                const dashesOf = e => aggregateOf(e) ? "1.5,3" : forkOf(e) ? "6,3" : partlyDown(e) ? "4,3" : null;
                 const arrowColour = e => {
                     const aggregate = aggregateOf(e);
                     if (aggregate) {
@@ -1785,7 +1794,7 @@
                     // small circle at the child
                     .classed("topologygraph-redundant", e => !!forkOf(e))
                     .attr("stroke-width", e => aggregateOf(e) ? 1.4 : null)
-                    .attr("stroke-dasharray", e => aggregateOf(e) ? "1.5,3" : forkOf(e) ? "6,3" : null)
+
                     .attr("stroke-linecap", e => aggregateOf(e) ? "round" : null);
                 // The legend explains membership lines while any are drawn
                 memberLegend.hidden = !geo.edges.some(e => aggregateOf(e));
@@ -1923,6 +1932,7 @@
                     edgePaths
                         .attr("stroke", arrowColour)
                         .attr("opacity", arrowOpacity)
+                        .attr("stroke-dasharray", dashesOf)
                         .attr("marker-end", e => aggregateOf(e) ? "none" : markerFor(arrowColour(e)))
                         .attr("marker-start", e => aggregateOf(e) ? diamondFor(arrowColour(e))
                             : forkOf(e) ? forkFor(arrowColour(e)) : null)
