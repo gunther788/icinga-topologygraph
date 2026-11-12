@@ -79,39 +79,39 @@ final class GraphBuilder
      * @return array The selection with the extra links
      */
     /**
-     * Draw the members of synthetic hosts in the selection's groups
-     * (vars.synthetic.members) as their neighbours, linked member -> synthetic
-     * host like a parent, whether or not a dependency says so. Members need not
-     * be parents: as Icinga dependencies, every member would be required.
+     * Draw the members of synthetic hosts in the selection's groups as their
+     * neighbours, linked member -> synthetic host like a parent, whether or not
+     * a dependency says so. Members need not be parents: as Icinga
+     * dependencies, every member would be required.
      *
      * @param array $selection As returned by select()
-     * @param array $hosts     The group hosts, from objects/hosts (with vars)
+     * @param array $members   Synthetic host name => the host names to draw as
+     *                         its members (every source of every member)
      *
      * @return array The selection with the members and their links added
      */
-    public static function addAggregateMembers(array $selection, array $hosts)
+    public static function addAggregateMembers(array $selection, array $members)
     {
         $names = array_flip($selection['names']);
         $links = [];
         foreach ($selection['links'] as $link) {
             $links[$link['source'] . "\0" . $link['target']] = $link;
         }
-        foreach ($hosts as $host) {
-            $name = (string) $host['name'];
+        foreach ($members as $name => $list) {
+            $name = (string) $name;
             if (! isset($selection['members'][$name])) {
                 continue;
             }
-            $vars = $host['attrs']['vars'][self::AGGREGATE_VAR] ?? null;
-            if (! is_array($vars) || empty($vars['members']) || ! is_array($vars['members'])) {
-                continue;
-            }
-            foreach ($vars['members'] as $member) {
+            foreach ($list as $member) {
                 $member = (string) $member;
                 if ($member === '' || $member === $name) {
                     continue;
                 }
                 $names[$member] = true;
-                $links[$member . "\0" . $name] = ['source' => $member, 'target' => $name];
+                $key = $member . "\0" . $name;
+                if (! isset($links[$key])) {
+                    $links[$key] = ['source' => $member, 'target' => $name];
+                }
             }
         }
         $selection['names'] = array_map('strval', array_keys($names));
@@ -230,90 +230,26 @@ final class GraphBuilder
         }
     }
 
-    /** Host variable holding a synthetic host's members and mode */
-    const AGGREGATE_VAR = 'synthetic';
-
     /**
-     * A synthetic host's aggregation: its members, the mode, how many members
-     * must be up (any: 1, all: all of them, quorum: a majority, or a number),
-     * and which members are up, down, or not known to Icinga.
-     *
-     * @param array|null $attrs       The host's attributes (with vars)
-     * @param array      $hostsByName Attributes of the hosts fetched, by name
-     *
-     * @return array|null
+     * @param array      $aggregates Per synthetic host, Aggregation::summary(); null: worked out
+     *                               here from $hosts alone (no member_groups, no health results)
      */
-    public static function aggregate($attrs, array $hostsByName)
-    {
-        $vars = $attrs['vars'][self::AGGREGATE_VAR] ?? null;
-        if (! is_array($vars) || empty($vars['members']) || ! is_array($vars['members'])) {
-            return null;
-        }
-        $members = array_values(array_unique(array_map('strval', $vars['members'])));
-        $total = count($members);
-        $mode = isset($vars['mode']) ? strtolower(trim((string) $vars['mode'])) : 'all';
-        if ($mode === 'any') {
-            $needed = 1;
-        } elseif ($mode === 'all') {
-            $needed = $total;
-        } elseif ($mode === 'quorum') {
-            $needed = intdiv($total, 2) + 1;
-        } elseif (ctype_digit($mode)) {
-            $needed = min($total, (int) $mode);
-        } else {
-            $needed = null; // a mode this module doesn't know: no threshold
-        }
-
-        $up = $down = $unknown = [];
-        foreach ($members as $member) {
-            $host = $hostsByName[$member] ?? null;
-            if ($host === null) {
-                $unknown[] = $member;
-            } elseif (($host['state'] ?? null) === 0 || ($host['state'] ?? null) === 0.0) {
-                if (($host['last_check'] ?? 0) > 0) {
-                    $up[] = $member;
-                } else {
-                    $unknown[] = $member; // pending
-                }
-            } else {
-                $down[] = $member;
-            }
-        }
-
-        return [
-            'mode'    => $mode,
-            'needed'  => $needed,
-            'total'   => $total,
-            'members' => $members,
-            'up'      => $up,
-            'down'    => $down,
-            'unknown' => $unknown
-        ];
-    }
-
-    /** Members of the synthetic hosts among $hosts */
-    public static function aggregateMembers(array $hosts)
-    {
-        $members = [];
-        foreach ($hosts as $host) {
-            $vars = $host['attrs']['vars'][self::AGGREGATE_VAR] ?? null;
-            if (is_array($vars) && ! empty($vars['members']) && is_array($vars['members'])) {
-                foreach ($vars['members'] as $member) {
-                    $members[(string) $member] = true;
-                }
-            }
-        }
-
-        return array_map('strval', array_keys($members));
-    }
-
-    public static function build(array $selection, array $hosts, $services, $hostPath)
+    public static function build(array $selection, array $hosts, $services, $hostPath, $aggregates = null)
     {
         $hostsByName = [];
         foreach ($hosts as $host) {
             $hostsByName[(string) $host['name']] = $host['attrs'] ?? [];
         }
-        $serviceSummary = $services === null ? null : self::summariseServices($services);
+        if ($aggregates === null) {
+            $aggregates = [];
+            foreach ($hostsByName as $name => $attrs) {
+                $config = Aggregation::config($attrs);
+                if ($config !== null) {
+                    $aggregates[$name] = Aggregation::summary($name, $config, $hostsByName, []);
+                }
+            }
+        }
+                $serviceSummary = $services === null ? null : self::summariseServices($services);
         $notifiedSummary = $services === null ? null : self::summariseServices($services, true);
         $noServices = [
             'total' => 0, 'ok' => 0, 'warning' => 0, 'critical' => 0, 'unknown' => 0, 'pending' => 0,
@@ -341,7 +277,7 @@ final class GraphBuilder
                 'member'       => isset($selection['members'][$name]),
                 // For a synthetic host aggregating others (vars.synthetic.members
                 // and .mode): how many members it needs, and which are up
-                'aggregate'    => self::aggregate($attrs, $hostsByName),
+                'aggregate'    => $aggregates[$name] ?? null,
                 // Host groups the host is in, for selecting a subset by group
                 'groups'       => array_values(array_map('strval', (array) ($attrs['groups'] ?? []))),
                 'link'         => $hostPath . rawurlencode($name)

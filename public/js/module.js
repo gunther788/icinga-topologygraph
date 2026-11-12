@@ -64,7 +64,12 @@
 
     // Synthetic hosts aggregating others (vars.synthetic.members and .mode):
     // "2 of 3 · 2 up" -- members needed of all, and how many are up
-    function aggregateText(aggregate, upCount = aggregate.up.length) {
+    // Healthy members: the aggregator's count when it sent one
+    function healthyCount(aggregate) {
+        return typeof aggregate.healthy === "number" ? aggregate.healthy : aggregate.up.length;
+    }
+
+    function aggregateText(aggregate, upCount = healthyCount(aggregate)) {
         const needed = aggregate.needed === null ? aggregate.total + " members" : aggregate.needed + " of " + aggregate.total;
         return needed + " \u00b7 " + upCount + " up";
     }
@@ -72,8 +77,8 @@
     // ok: every member up; degraded: some aren't, but enough are; failed:
     // fewer are up than needed
     function aggregateHealth(aggregate) {
-        const up = aggregate.up.length;
-        if (up === aggregate.total) return "ok";
+        const up = healthyCount(aggregate);
+        if (up >= aggregate.total) return "ok";
         if (aggregate.needed !== null && up < aggregate.needed) return "failed";
         return "degraded";
     }
@@ -192,6 +197,16 @@
     }
 
     /**
+     * Whether a link is a synthetic host's member meeting it (the aggregator's
+     * Member dependency puts those in redundancy groups too; they are boxed and
+     * drawn as membership, not as alternatives)
+     */
+    function isMembership(nodes, link) {
+        const child = nodes.find(n => n.name === link.target);
+        return !!(child && child.aggregate && child.aggregate.members.includes(link.source));
+    }
+
+    /**
      * Track the redundancy group of the links drawn as one edge: kept only
      * while every link behind the edge is in the same group (then the edge
      * is one of the alternatives; otherwise its parents are required).
@@ -288,7 +303,7 @@
         const rightmost = new Set(columns[0]);
         // Alternative parents (in a redundancy group) each keep their own
         // arrow, so they are never boxed with others
-        const alternative = new Set(validLinks.filter(l => l.redundancy_group).map(l => l.source));
+        const alternative = new Set(validLinks.filter(l => l.redundancy_group && !isMembership(nodes, l)).map(l => l.source));
         // Hosts further left with the same parents and children share a box
         const siblingOf = new Map();
         siblingGroups(nodes.map(n => n.name).filter(name => !alternative.has(name)), parentsOf, childrenOf).forEach(names => {
@@ -887,7 +902,7 @@
 
             // Hosts without parents, grouped by their children; alternative
             // parents (in a redundancy group) each keep their own arrow
-            const alternative = new Set(validLinks.filter(l => l.redundancy_group).map(l => l.source));
+            const alternative = new Set(validLinks.filter(l => l.redundancy_group && !isMembership(nodes, l)).map(l => l.source));
             const groupByKey = new Map();
             nodes.filter(n => !hasParent.has(n.name)).forEach(n => {
                 const key = childrenOf.get(n.name).slice().sort().join("\0") + (alternative.has(n.name) ? "\u0002" + n.name : "");
@@ -1885,7 +1900,9 @@
                         stateName(d) === "unreachable" ? "(down because a parent is down)" : null,
                         servicesText(serviceSummary(d), notifiedOnly),
                         d.zone ? "zone: " + d.zone : null,
-                        d.aggregate ? d.aggregate.mode + ": needs " + aggregateText(d.aggregate) : null,
+                        d.aggregate ? d.aggregate.mode + ": needs " + aggregateText(d.aggregate)
+                            + (d.aggregate.sources ? " (sources: " + d.aggregate.sources + ")" : "") : null,
+                        d.aggregate && d.aggregate.result ? "aggregator: " + d.aggregate.result : null,
                         d.aggregate && d.aggregate.down.length ? "members down: " + d.aggregate.down.join(", ") : null,
                         folded.has(d.name) ? "members collapsed: " + folded.get(d.name).join(", ") : null,
                         ...[...(redundancy.get(d.name) || new Map())].map(([group, parents]) => {
