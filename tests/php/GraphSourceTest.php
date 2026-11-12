@@ -154,8 +154,10 @@ $agg = GraphSource::fetch(fakeApi([
     ],
     'services' => []
 ], $requests), 'web-checks', '/host?name=');
-check('outside synthetic host: one more host request, for its members only', [array_column($requests, 'kind'), end($requests)['vars']],
-    [['hosts', 'dependencies', 'hosts', 'services', 'hosts'], ['names' => ['w1', 'w2', 'w3']]]);
+check('outside synthetic host: its members (and their sources) fetched after the services, then its health',
+    [array_column($requests, 'kind'), $requests[4]['filter'], $requests[4]['vars']],
+    [['hosts', 'dependencies', 'hosts', 'services', 'hosts', 'services'],
+        'host.name in names || host.vars.real_host in names', ['names' => ['w1', 'w2', 'w3']]]);
 $q = array_values(array_filter($agg['nodes'], function ($n) {
     return $n['name'] === 'quorum-1';
 }))[0];
@@ -186,6 +188,66 @@ check('members without dependencies: drawn and linked', [array_column($noParents
 ]);
 check('members without dependencies: unknown member counted, not drawn',
     $noParents['nodes'][0]['aggregate']['unknown'], ['ghost']);
+
+// Members checked from several zones (vars.real_host), as for fca_uat_instance:
+// every source is drawn as a member, and the aggregator's health result wins
+$requests = [];
+$zones = [
+    'acme'       => [],
+    'acme-stag'  => ['real_host' => 'acme'],
+    'acme-cloud' => ['real_host' => 'acme'],
+    'ra-stag'    => ['real_host' => 'ra'],
+    'ra'         => [],
+    'web-1'      => [],
+    'web-1-b'    => ['real_host' => 'web-1']
+];
+$fca = GraphSource::fetch(fakeApi([
+    'hosts' => function ($body) use ($zones) {
+        if ($body['filter'] === 'group in host.groups' && $body['filter_vars']['group'] === 'synthetic') {
+            return [host('fca', ['groups' => ['synthetic'], 'vars' => ['synthetic' => [
+                'members' => ['acme', 'ra-stag'], 'member_groups' => ['web'], 'mode' => 'all'
+            ]]])];
+        }
+        if ($body['filter'] === 'group in host.groups') {          // member_groups
+            return [host('web-1', ['groups' => ['web']])];
+        }
+        $names = $body['filter_vars']['names'];
+        $byReal = strpos($body['filter'], 'real_host') !== false;
+        $found = [];
+        foreach ($zones as $name => $vars) {
+            $real = $vars['real_host'] ?? $name;
+            if (in_array($name, $names, true) || ($byReal && in_array($real, $names, true))) {
+                $found[] = host($name, ['vars' => $vars, 'state' => $name === 'acme' ? 1 : 0]);
+            }
+        }
+        return $found;
+    },
+    'dependencies' => [],
+    'services' => function ($body) {
+        return strpos($body['filter'], 'service.name == health') === 0
+            ? [['attrs' => ['host_name' => 'fca', 'last_check_result' => [
+                'output' => 'CRITICAL: mode=all, healthy=2/3; issues: acme (DOWN)', 'performance_data' => ['healthy=2;;3:;0;3']
+            ]]]]
+            : [];
+    }
+], $requests), 'synthetic', '/host?name=');
+$names = array_column($fca['nodes'], 'name');
+sort($names);
+check('real hosts: every source of every member is drawn', $names,
+    ['acme', 'acme-cloud', 'acme-stag', 'fca', 'ra', 'ra-stag', 'web-1', 'web-1-b']);
+check('real hosts: sources found by name or vars.real_host, in two rounds', array_map(function ($r) {
+    return $r['vars']['names'] ?? null;
+}, array_values(array_filter($requests, function ($r) {
+    return strpos($r['filter'], 'real_host') !== false;
+}))), [['acme', 'ra-stag', 'web-1'], ['ra']]);
+$agg = array_values(array_filter($fca['nodes'], function ($n) {
+    return $n['name'] === 'fca';
+}))[0]['aggregate'];
+check('real hosts: counts per real host, from the aggregator', [$agg['healthy'], $agg['needed'], $agg['total'], $agg['from']], [2, 3, 3, 'aggregator']);
+check('real hosts: worked out here by best source (acme is up from stag and cloud)', [$agg['up'], $agg['down']], [['acme', 'ra', 'web-1'], []]);
+check('real hosts: membership links from every source', count(array_filter($fca['links'], function ($l) {
+    return $l['target'] === 'fca';
+})), 7);
 
 // Hosts failing is an error for the caller
 $thrown = null;

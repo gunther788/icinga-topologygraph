@@ -51,22 +51,36 @@ group, the host groups offered on the page, and the refresh interval.
   an arrow to a parent that is down is amber while another parent of the group is up, and red when none is. The
   hover text lists each group, for example `redundancy group svc: 1 of 2 parents up (down: svc-dc1)`. Alternative
   parents are never boxed together, so each keeps its own arrow.
-- **Synthetic hosts with members:** a host with `vars.synthetic.members` aggregates those hosts, in the mode set by
-  `vars.synthetic.mode`. Its members meet it on a dotted line ending in a hollow diamond, with no arrowhead, so
-  membership doesn't read as a dependency. Members are drawn whether or not they are also parents: the line
-  comes from `vars.synthetic.members`, and replaces the dependency arrow if there is one. A badge left of the host's name shows how many members it needs out of
-  all of them, and how many are up, for example `2 of 3 · 2 up`:
+- **Synthetic hosts with members:** synthetic hosts are read the way
+  [python-icinga2-aggregator](https://github.com/gunther788/python-icinga2-aggregator) reads them: a host with
+  `vars.synthetic.members` (and/or `vars.synthetic.member_groups`, whose hosts are added) aggregates those
+  members, in the mode set by `vars.synthetic.mode`. Its members meet it on a dotted line ending in a hollow
+  diamond, with no arrowhead, so membership doesn't read as a dependency. Members are drawn whether or not they
+  are also parents: the line comes from the variables, and replaces the dependency arrow if there is one. A badge
+  left of the host's name shows how many members it needs out of all of them, and how many are healthy, for
+  example `2 of 3 · 2 up`:
 
   | `vars.synthetic.mode` | Members needed |
   |---|---|
   | `any` | 1 |
   | `all` (or not set) | all of them |
-  | `quorum` | a majority: 2 of 3, 3 of 4, 3 of 5 |
+  | `quorum` | `vars.synthetic.quorum`: a count, or a percentage such as `"66%"` (rounded up); by default a majority |
   | a number, e.g. `"2"` | that many (at most all) |
 
-  The line and the badge are neutral while every member is up, amber while some are down but enough are up, and
-  red when too few are up. Hover over the host to see which members are down. The counts include members that
-  aren't drawn.
+  **Members checked from several zones:** host objects with the same `vars.real_host` (a host without it stands
+  for itself) are the *sources* of one member, e.g. `acme` from its home zone and `acme-stag` and `acme-cloud`
+  with `vars.real_host = "acme"`. Listing any of them adds the member once, with all its sources: every source is
+  drawn with a membership line, but counts are per real host. `vars.synthetic.sources` decides how a member's
+  sources combine: `best` (default: up if any source is up), `worst`, `majority`, or `home` (the object with
+  `vars.home = true`, else the one named like the real host; `best` while it has no result).
+
+  The counts come from the aggregator itself when it has written its result: the performance data
+  `healthy=<n>;;<required>:;0;<total>` of the synthetic host's `health` service. The hover text then also shows
+  the aggregator's result line. Without it, the counts are worked out here from the sources' host states by the
+  same rules, including members that aren't drawn.
+
+  The line and the badge are neutral while every member is healthy, amber while some aren't but enough are, and
+  red when too few are. Hover over the host to see which members are down.
 
   Members don't need to be parents, and usually shouldn't be. Each Icinga `Dependency` counts on its own, so
   with every member as a parent, one member down makes the synthetic host unreachable, and its notifications are
@@ -293,19 +307,22 @@ are not cached.
 
 ## Load on the Icinga API
 
-Each update makes up to six small requests, each filtered on the Icinga side:
+Each update makes a handful of small requests, each filtered on the Icinga side:
 
 1. the hosts in the graphed groups;
 2. the host-to-host dependencies that touch them;
-3. the hosts outside the groups at the other end of those dependencies, and the members of synthetic hosts in the
-   groups;
-4. the dependencies between those outside hosts, for example between a host in the DMZ and one in the backend. This
+3. only with synthetic hosts in the groups: their members, with every source of each (`host.name in names ||
+   host.vars.real_host in names`; a second round when a listed member is itself another host's source), and the
+   hosts of their `member_groups`;
+4. the hosts outside the groups at the other end of the dependencies;
+5. the dependencies between those outside hosts, for example between a host in the DMZ and one in the backend. This
    adds lines between hosts that are already drawn, never more hosts;
-5. the services of all drawn hosts;
-6. only when a synthetic host has members that aren't drawn: those members' states.
+6. the services of all drawn hosts;
+7. only with synthetic hosts drawn outside the groups: their members and sources, for the counts;
+8. only with synthetic hosts: the aggregator's results, from their `health` services.
 
-Host requests include the hosts' custom variables, to read `vars.synthetic`; only the members and the mode are
-sent on to the page.
+Host requests include the hosts' custom variables, to read `vars.synthetic`, `vars.real_host` and `vars.home`;
+only a summary of each aggregation is sent on to the page.
 
 The finished graph is cached on the Icinga Web server for half the refresh interval, separately for each combination
 of host groups, in a folder in the system's temporary directory. Several people looking at the same host groups

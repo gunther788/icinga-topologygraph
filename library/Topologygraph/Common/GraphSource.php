@@ -23,8 +23,10 @@ final class GraphSource
 {
     const HOST_ATTRS = 'attrs=name&attrs=display_name&attrs=state&attrs=last_check&attrs=groups&attrs=zone'
         . '&attrs=last_reachable&attrs=acknowledgement&attrs=downtime_depth&attrs=vars';
-    // Just enough to tell whether a synthetic host's member is up
-    const MEMBER_ATTRS = 'attrs=name&attrs=state&attrs=last_check';
+    // Enough to count a synthetic host's members that aren't drawn
+    const MEMBER_ATTRS = 'attrs=name&attrs=state&attrs=last_check&attrs=groups&attrs=vars';
+    // The aggregator's result on a synthetic host's health service
+    const HEALTH_ATTRS = 'attrs=host_name&attrs=last_check_result';
     const DEPENDENCY_ATTRS = 'attrs=parent_host_name&attrs=child_host_name&attrs=child_service_name'
         . '&attrs=redundancy_group';
     const SERVICE_ATTRS = 'attrs=host_name&attrs=state&attrs=last_check&attrs=acknowledgement&attrs=downtime_depth'
@@ -46,6 +48,9 @@ final class GraphSource
         if (! $groupNames) {
             return GraphBuilder::build(GraphBuilder::select([], [], $groups), [], [], $hostPath);
         }
+        // Every host fetched so far, by name (drawn or not)
+        $known = [];
+        self::remember($known, $groupHosts);
 
         $dependencies = $api(
             'objects/dependencies?' . self::DEPENDENCY_ATTRS,
@@ -57,17 +62,25 @@ final class GraphSource
         );
 
         $selection = GraphBuilder::select($groupHosts, $dependencies, $groups);
-        // Members of synthetic hosts in the groups, even without a dependency
-        $selection = GraphBuilder::addAggregateMembers($selection, $groupHosts);
+
+        // Synthetic hosts in the groups: their members are drawn, with every
+        // source (host objects with the same vars.real_host), dependency or not
+        $groupMembers = []; // host group => host names, for member_groups
+        $synthetic = self::configs($groupHosts);
+        self::fetchMembers($api, $synthetic, $known, $groupMembers, self::HOST_ATTRS);
+        $selection = GraphBuilder::addAggregateMembers(
+            $selection,
+            self::sourcesOf($synthetic, $known, $groupMembers)
+        );
 
         $neighbours = array_values(array_diff($selection['names'], $groupNames));
-        $neighbourHosts = $neighbours ? $api(
+        $toFetch = array_values(array_diff($neighbours, array_keys($known)));
+        self::remember($known, $toFetch ? $api(
             'objects/hosts?' . self::HOST_ATTRS,
-            ['filter' => 'host.name in names', 'filter_vars' => ['names' => $neighbours]]
-        ) : [];
+            ['filter' => 'host.name in names', 'filter_vars' => ['names' => $toFetch]]
+        ) : []);
 
         // Only hosts Icinga knows (a member listed in vars may not exist)
-        $known = array_flip(self::names(array_merge($groupHosts, $neighbourHosts)));
         $selection['names'] = array_values(array_filter($selection['names'], function ($name) use ($known) {
             return isset($known[$name]);
         }));
@@ -102,18 +115,142 @@ final class GraphSource
             $services = null;
         }
 
-        // States of synthetic hosts' members that aren't drawn
-        $fetched = array_merge($groupHosts, $neighbourHosts);
-        $missing = array_values(array_diff(
-            GraphBuilder::aggregateMembers($fetched),
-            self::names($fetched)
-        ));
-        $memberHosts = $missing ? $api(
-            'objects/hosts?' . self::MEMBER_ATTRS,
-            ['filter' => 'host.name in names', 'filter_vars' => ['names' => $missing]]
-        ) : [];
+        // Synthetic hosts drawn outside the groups: their members aren't
+        // drawn, but are needed for the counts
+        $drawn = array_intersect_key($known, array_flip($selection['names']));
+        $outside = array_diff_key(self::configs(array_values($drawn)), $synthetic);
+        self::fetchMembers($api, $outside, $known, $groupMembers, self::MEMBER_ATTRS);
 
-        return GraphBuilder::build($selection, array_merge($fetched, $memberHosts), $services, $hostPath);
+        // The aggregator's own results (its health service), when there are any
+        $all = $synthetic + $outside;
+        $health = [];
+        if ($all) {
+            try {
+                foreach ($api('objects/services?' . self::HEALTH_ATTRS, [
+                    'filter'      => 'service.name == health && host.name in names',
+                    'filter_vars' => ['health' => Aggregation::HEALTH_SERVICE, 'names' => array_map('strval', array_keys($all))]
+                ]) as $service) {
+                    $health[(string) $service['attrs']['host_name']] = $service['attrs']['last_check_result'] ?? null;
+                }
+            } catch (\Exception $e) {
+                // Without them, the counts are worked out here
+            }
+        }
+
+        $attrs = self::attrsByName($known);
+        $aggregates = [];
+        foreach ($all as $name => $config) {
+            $aggregates[$name] = Aggregation::summary($name, $config, $attrs, $groupMembers, $health[$name] ?? null);
+        }
+
+        return GraphBuilder::build($selection, array_values($known), $services, $hostPath, $aggregates);
+    }
+
+    /**
+     * Fetch the members of synthetic hosts and every source of each (hosts
+     * with the same vars.real_host), and the hosts of their member_groups
+     *
+     * @param callable $api
+     * @param array    $configs      Synthetic host name => Aggregation::config()
+     * @param array    $known        Hosts fetched so far, by name; added to
+     * @param array    $groupMembers Host group => host names; added to
+     * @param string   $attrs        Host attributes to fetch
+     */
+    private static function fetchMembers(callable $api, array $configs, array &$known, array &$groupMembers, $attrs)
+    {
+        if (! $configs) {
+            return;
+        }
+        $names = [];
+        $groups = [];
+        foreach ($configs as $config) {
+            $names = array_merge($names, $config['members']);
+            $groups = array_merge($groups, $config['member_groups']);
+        }
+        $groups = array_values(array_diff(array_unique($groups), array_keys($groupMembers)));
+        if ($groups) {
+            foreach ($groups as $group) {
+                $groupMembers[$group] = [];
+            }
+            foreach ($api('objects/hosts?' . $attrs, self::inGroups($groups)) as $host) {
+                self::remember($known, [$host]);
+                foreach (array_intersect($groups, (array) ($host['attrs']['groups'] ?? [])) as $group) {
+                    $groupMembers[$group][] = (string) $host['name'];
+                }
+            }
+        }
+        foreach ($configs as $config) {
+            foreach ($config['member_groups'] as $group) {
+                $names = array_merge($names, $groupMembers[$group] ?? []);
+            }
+        }
+
+        // The members, and every host naming one of them as its real host; a
+        // member that is itself another host's source needs a second round
+        $asked = [];
+        for ($round = 0; $round < 3; $round++) {
+            $ask = array_values(array_diff(array_unique($names), $asked));
+            if (! $ask) {
+                break;
+            }
+            $asked = array_merge($asked, $ask);
+            $names = [];
+            foreach ($api('objects/hosts?' . $attrs, [
+                'filter'      => 'host.name in names || host.vars.real_host in names',
+                'filter_vars' => ['names' => $ask]
+            ]) as $host) {
+                self::remember($known, [$host]);
+                $names[] = Aggregation::realHost($host['name'], $host['attrs'] ?? []);
+            }
+        }
+    }
+
+    /** Synthetic host name => its aggregation config, for the hosts that have one */
+    private static function configs(array $hosts)
+    {
+        $configs = [];
+        foreach ($hosts as $host) {
+            $config = Aggregation::config($host['attrs'] ?? null);
+            if ($config !== null) {
+                $configs[(string) $host['name']] = $config;
+            }
+        }
+
+        return $configs;
+    }
+
+    /** Synthetic host name => every source of its members */
+    private static function sourcesOf(array $configs, array $known, array $groupMembers)
+    {
+        $attrs = self::attrsByName($known);
+        $result = [];
+        foreach ($configs as $name => $config) {
+            $result[$name] = [];
+            foreach (Aggregation::sources($config, $attrs, $groupMembers, $name) as $real => $sources) {
+                // A member Icinga doesn't know is kept by name (and left out later)
+                $result[$name] = array_merge($result[$name], $sources ?: [$real]);
+            }
+        }
+
+        return $result;
+    }
+
+    /** Add API host results to $known (the first fetch of a host wins) */
+    private static function remember(array &$known, array $hosts)
+    {
+        foreach ($hosts as $host) {
+            $name = (string) $host['name'];
+            if (! isset($known[$name])) {
+                $known[$name] = $host;
+            }
+        }
+    }
+
+    private static function attrsByName(array $known)
+    {
+        return array_map(function ($host) {
+            return $host['attrs'] ?? [];
+        }, $known);
     }
 
     /**

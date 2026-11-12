@@ -4,7 +4,7 @@
   "description": "Browser and PHP tests for the topologygraph module",
   "scripts": {
     "test": "npm run test:php && npm run test:browser",
-    "test:php": "php php/GraphBuilderTest.php && php php/GraphSourceTest.php && php php/JsonCacheTest.php && php php/GraphExplainTest.php && php php/HostGroupPatternsTest.php",
+    "test:php": "php php/GraphBuilderTest.php && php php/GraphSourceTest.php && php php/JsonCacheTest.php && php php/GraphExplainTest.php && php php/HostGroupPatternsTest.php && php php/AggregationTest.php",
     "test:browser": "node --test --test-concurrency=1 \"browser/*.test.js\"",
     "compare": "node compare-layouts.js"
   },

@@ -4,6 +4,7 @@
  * Tiny assertion helper shared by the PHP tests (no framework needed).
  */
 
+require_once __DIR__ . '/../../library/Topologygraph/Common/Aggregation.php';
 require_once __DIR__ . '/../../library/Topologygraph/Common/GraphBuilder.php';
 require_once __DIR__ . '/../../library/Topologygraph/Common/GraphSource.php';
 require_once __DIR__ . '/../../library/Topologygraph/Common/GraphExplain.php';

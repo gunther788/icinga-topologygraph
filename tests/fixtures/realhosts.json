@@ -1,0 +1,128 @@
+{
+ "nodes": [
+  {
+   "name": "acme",
+   "label": "acme",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#acme"
+  },
+  {
+   "name": "acme-stag",
+   "label": "acme-stag",
+   "state": 1,
+   "last_check": 1,
+   "member": true,
+   "link": "#acme-stag"
+  },
+  {
+   "name": "ra",
+   "label": "ra",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#ra"
+  },
+  {
+   "name": "ra-stag",
+   "label": "ra-stag",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#ra-stag"
+  },
+  {
+   "name": "portal",
+   "label": "portal",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#portal"
+  },
+  {
+   "name": "portal-cloud",
+   "label": "portal-cloud",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#portal-cloud"
+  },
+  {
+   "name": "fca_uat_instance",
+   "label": "fca_uat_instance",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#fca",
+   "aggregate": {
+    "mode": "all",
+    "needed": 3,
+    "total": 3,
+    "healthy": 3,
+    "members": [
+     "acme",
+     "acme-stag",
+     "ra",
+     "ra-stag",
+     "portal",
+     "portal-cloud"
+    ],
+    "sources": "best",
+    "up": [
+     "acme",
+     "ra",
+     "portal"
+    ],
+    "down": [],
+    "unknown": [],
+    "from": "aggregator",
+    "result": "OK: mode=all, healthy=3/3; issues: acme-stag (DOWN, ignored source)"
+   }
+  },
+  {
+   "name": "shop.example.com",
+   "label": "shop.example.com",
+   "state": 0,
+   "last_check": 1,
+   "member": true,
+   "link": "#shop"
+  }
+ ],
+ "links": [
+  {
+   "source": "acme",
+   "target": "fca_uat_instance",
+   "redundancy_group": "acme"
+  },
+  {
+   "source": "acme-stag",
+   "target": "fca_uat_instance",
+   "redundancy_group": "acme"
+  },
+  {
+   "source": "ra",
+   "target": "fca_uat_instance",
+   "redundancy_group": "ra"
+  },
+  {
+   "source": "ra-stag",
+   "target": "fca_uat_instance",
+   "redundancy_group": "ra"
+  },
+  {
+   "source": "portal",
+   "target": "fca_uat_instance",
+   "redundancy_group": "portal"
+  },
+  {
+   "source": "portal-cloud",
+   "target": "fca_uat_instance",
+   "redundancy_group": "portal"
+  },
+  {
+   "source": "fca_uat_instance",
+   "target": "shop.example.com"
+  }
+ ]
+}

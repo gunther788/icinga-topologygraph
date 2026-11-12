@@ -96,17 +96,24 @@ check('redundancy groups kept when adding links among drawn hosts', array_column
 
 // --- addAggregateMembers() ---------------------------------------------------
 
-$quorumHost = host('quorum-1', ['groups' => ['synthetic'], 'vars' => ['synthetic' => [
-    'members' => ['w1', 'w2', 'quorum-1', ''], 'mode' => 'quorum'   // no parents at all
-]]]);
-$outsideQuorum = host('quorum-2', ['vars' => ['synthetic' => ['members' => ['w9']]]]);
+$quorumHost = host('quorum-1', ['groups' => ['synthetic']]);
+$outsideQuorum = host('quorum-2');
 $sel = GraphBuilder::select([$quorumHost, $outsideQuorum], [dependency('w1', 'quorum-1')], 'synthetic');
-$withMembers = GraphBuilder::addAggregateMembers($sel, [$quorumHost, $outsideQuorum]);
-check('members: drawn without being parents', $withMembers['names'], ['quorum-1', 'w1', 'w2']);
+$withMembers = GraphBuilder::addAggregateMembers($sel, [
+    'quorum-1' => ['w1', 'w2', 'w2-zone-b', 'quorum-1', ''],   // no dependency needed; never itself
+    'quorum-2' => ['w9']                                       // not in the groups: not drawn
+]);
+check('members: drawn without being parents, every source', $withMembers['names'], ['quorum-1', 'w1', 'w2', 'w2-zone-b']);
 check('members: linked like parents, once each', $withMembers['links'], [
-    ['source' => 'w1', 'target' => 'quorum-1'], ['source' => 'w2', 'target' => 'quorum-1']
+    ['source' => 'w1', 'target' => 'quorum-1'], ['source' => 'w2', 'target' => 'quorum-1'],
+    ['source' => 'w2-zone-b', 'target' => 'quorum-1']
 ]);
 check('members: only of synthetic hosts in the groups', in_array('w9', $withMembers['names'], true), false);
+$keepGroup = GraphBuilder::addAggregateMembers(
+    ['names' => ['q', 'a'], 'members' => ['q' => true], 'links' => [['source' => 'a', 'target' => 'q', 'redundancy_group' => 'g']]],
+    ['q' => ['a']]
+);
+check('members: an existing dependency link is kept as it is', $keepGroup['links'], [['source' => 'a', 'target' => 'q', 'redundancy_group' => 'g']]);
 
 // --- addLinksAmong() --------------------------------------------------------
 
@@ -197,37 +204,5 @@ check('build: both summaries attached', [
 check('build: notified summary empty for a host with only silenced services', [
     $mixedByName['db-1']['services']['total'], $mixedByName['db-1']['services_notified']['total']
 ], [1, 0]);
-
-// --- aggregate() ------------------------------------------------------------
-
-$workers = [
-    'w1' => ['state' => 1.0, 'last_check' => 5],   // down (the API sends floats)
-    'w2' => ['state' => 0.0, 'last_check' => 5],
-    'w3' => ['state' => 0, 'last_check' => 5],
-    'w4' => ['state' => 0, 'last_check' => 0]      // pending
-];
-$synthetic = function ($mode, array $members = ['w1', 'w2', 'w3']) {
-    return ['vars' => ['synthetic' => ['members' => $members, 'parents' => $members, 'mode' => $mode]]];
-};
-$quorum = GraphBuilder::aggregate($synthetic('quorum'), $workers);
-check('aggregate: quorum needs a majority', [$quorum['mode'], $quorum['needed'], $quorum['total']], ['quorum', 2, 3]);
-check('aggregate: members up and down', [$quorum['up'], $quorum['down'], $quorum['unknown']], [['w2', 'w3'], ['w1'], []]);
-check('aggregate: any needs one, all needs every member', [
-    GraphBuilder::aggregate($synthetic('any'), $workers)['needed'], GraphBuilder::aggregate($synthetic('ALL '), $workers)['needed']
-], [1, 3]);
-check('aggregate: quorum of four needs three', GraphBuilder::aggregate($synthetic('quorum', ['w1', 'w2', 'w3', 'w4']), $workers)['needed'], 3);
-check('aggregate: a number is a threshold (at most all)', [
-    GraphBuilder::aggregate($synthetic('2'), $workers)['needed'], GraphBuilder::aggregate($synthetic('9'), $workers)['needed']
-], [2, 3]);
-check('aggregate: unknown mode has no threshold', GraphBuilder::aggregate($synthetic('best-effort'), $workers)['needed'], null);
-check('aggregate: no mode means all', GraphBuilder::aggregate(['vars' => ['synthetic' => ['members' => ['w2']]]], $workers)['needed'], 1);
-check('aggregate: pending and unknown members are not up',
-    GraphBuilder::aggregate($synthetic('any', ['w4', 'gone']), $workers)['unknown'], ['w4', 'gone']);
-check('aggregate: none for ordinary hosts', [
-    GraphBuilder::aggregate(['vars' => ['synthetic' => ['parents' => ['w1']]]], $workers), GraphBuilder::aggregate(null, $workers)
-], [null, null]);
-check('aggregate members of several hosts, once each', GraphBuilder::aggregateMembers([
-    ['name' => 'q1', 'attrs' => $synthetic('quorum')], ['name' => 'q2', 'attrs' => $synthetic('any', ['w3', 'w4'])], ['name' => 'x', 'attrs' => []]
-]), ['w1', 'w2', 'w3', 'w4']);
 
 finish();
