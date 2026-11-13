@@ -238,9 +238,11 @@
     // Drawing constants. BASE spacing is the tightest layout; it is widened to
     // fill the window when there is room (see computeLayout).
     const FONT_SIZE = 12;
-    const BASE = {rowHeight: 24, columnGap: 90, subColumnGap: 40};
+    const BASE = {rowHeight: 24, columnGap: 81, subColumnGap: 36};
     const PADDING = 16;
-    const LABEL_OFFSET = 10; // circle centre to the end of its label (labels sit left of the dot)
+    // Circle centre to the end of its label (labels sit left of the dot); the
+    // label's plate stays clear of the service ring (radius 8.5, 2px wide)
+    const LABEL_OFFSET = 15;
     const BOX_PAD_X = 6;
 
     /**
@@ -887,7 +889,7 @@
             const elk = new ELK();
             const ROW = BASE.rowHeight;
             const DOT_PAD = 4; // space right of a dot
-            const LAYER_GAP = 60;
+            const LAYER_GAP = 54;
             const labelWidth = measureLabels(nodes);
             const names = new Set(nodes.map(n => n.name));
             const validLinks = links.filter(l => names.has(l.source) && names.has(l.target) && l.source !== l.target);
@@ -1693,7 +1695,10 @@
                 height = geo.height;
                 content.attr("transform", `translate(0,${-geo.top})`);
                 const margin = 40;
-                zoom.translateExtent([[-margin, -margin], [width + margin, height + margin]]);
+                // Up to half a window past each edge: zooming in on a diagram smaller
+                // than the window then never forces it back to the centre
+                const padX = Math.max(margin, viewport.clientWidth / 2), padY = Math.max(margin, viewport.clientHeight / 2);
+                zoom.translateExtent([[-padX, -padY], [width + padX, height + padY]]);
 
                 const nodeByName = new Map(nodes.map(n => [n.name, n]));
                 // Arrows take the colour of a child that is down or unreachable;
@@ -2354,8 +2359,7 @@
             layoutNote.className = "topologygraph-note";
             const groupNote = document.createElement("span");
             groupNote.className = "topologygraph-note";
-            hint.append(layoutNote, groupNote, status, "Scroll to zoom \u00b7 Drag or Shift + scroll to move");
-            viewport.append(hint);
+            hint.append(layoutNote, groupNote, status, "Scroll: zoom \u00b7 Drag: move");
 
             // Legend for the colours, bottom left
             const legend = document.createElement("div");
@@ -2421,12 +2425,12 @@
             [
                 [swatch(COLOURS.up), "up"],
                 [swatch(COLOURS.down), "down"],
-                [swatch(COLOURS.unreachable), "unreachable (parent down)"],
-                [swatch(COLOURS.down, {faded: true}), "acknowledged / downtime"],
+                [swatch(COLOURS.unreachable), "unreachable"],
+                [swatch(COLOURS.down, {faded: true}), "ack / downtime"],
                 [swatch(COLOURS.pending), "pending"],
                 [swatch(COLOURS.up, {ring: COLOURS.warning}), "service problem"],
-                [arrowSwatch(COLOURS.edge), "within the host group"],
-                [arrowSwatch(COLOURS.edgeOutside), "to or from other hosts"]
+                [arrowSwatch(COLOURS.edge), "in group"],
+                [arrowSwatch(COLOURS.edgeOutside), "other hosts"]
             ].forEach(([icon, text]) => {
                 const item = document.createElement("span");
                 item.append(icon, text);
@@ -2455,17 +2459,21 @@
             };
             const redundancyLegend = document.createElement("span");
             redundancyLegend.className = "topologygraph-legend-redundancy";
-            redundancyLegend.append(forkSwatch(), "any one of these parents");
+            redundancyLegend.append(forkSwatch(), "any one parent");
             redundancyLegend.hidden = true;
             const memberLegend = document.createElement("span");
             memberLegend.className = "topologygraph-legend-members";
             memberLegend.title = "Dotted, amber while some members are down but enough are up, red when too few are up";
-            memberLegend.append(memberSwatch(), "members of a synthetic host");
+            memberLegend.append(memberSwatch(), "members");
             memberLegend.hidden = true;
             legend.append(memberLegend, redundancyLegend);
-            // "within the host groups" when several are graphed
-            const withinLegend = [...legend.childNodes].find(item => item.textContent === "within the host group").lastChild;
-            viewport.append(legend);
+            // "in groups" when several are graphed
+            const withinLegend = [...legend.childNodes].find(item => item.textContent === "in group").lastChild;
+            // Legend on the left, hint on the right, in one bar along the bottom
+            const footer = document.createElement("div");
+            footer.className = "topologygraph-footer";
+            footer.append(legend, hint);
+            viewport.append(footer);
 
             // --- Sizing ----------------------------------------------------------
 
@@ -2579,7 +2587,7 @@
                         : "";
                     // Only offered when there is something to collapse
                     collapseToggle.hidden = !fullData.nodes.some(n => n.aggregate);
-                    withinLegend.textContent = graphedGroups.length > 1 ? "within the host groups" : "within the host group";
+                    withinLegend.textContent = graphedGroups.length > 1 ? "in groups" : "in group";
                     updateGroupPicker();
                     updatePicker();
                     const visible = visibleData();

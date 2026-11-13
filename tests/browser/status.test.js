@@ -84,8 +84,17 @@ test('host states, handled problems and service rings', async () => {
         assert.match(s['standalone'].title, /services: not available/);
 
         const legend = await page.$$eval('.topologygraph-legend span:not([hidden])', items => items.map(i => i.textContent));
-        assert.deepEqual(legend, ['up', 'down', 'unreachable (parent down)', 'acknowledged / downtime', 'pending',
-            'service problem', 'within the host group', 'to or from other hosts']);
+        assert.deepEqual(legend, ['up', 'down', 'unreachable', 'ack / downtime', 'pending',
+            'service problem', 'in group', 'other hosts']);
+        const lines = await page.$$eval('.topologygraph-legend span:not([hidden])',
+            items => new Set(items.map(i => Math.round(i.getBoundingClientRect().top))).size);
+        assert.equal(lines, 1, 'the legend fits on one line');
+        // Each name's plate ends left of the service ring (radius 8.5, 2px wide)
+        const gaps = await page.$$eval('.topologygraph-viewport svg a', as => as.map(a => {
+            const plate = a.querySelector('rect.topologygraph-label-plate');
+            return -9.5 - (+plate.getAttribute('x') + +plate.getAttribute('width'));
+        }));
+        assert.ok(Math.min(...gaps) >= 2, `names stay clear of the rings (gap ${Math.min(...gaps).toFixed(1)}px)`);
         assert.deepEqual(errors, []);
     } finally {
         await close();

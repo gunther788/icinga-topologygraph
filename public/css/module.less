@@ -315,17 +315,28 @@
   opacity: 0.7;
 }
 
-.topologygraph-legend {
+// Legend (left) and hint (right) share one bar along the bottom: the legend
+// takes the room the hint leaves and wraps only when the window is too narrow
+.topologygraph-footer {
   position: absolute;
   left: 8px;
+  right: 8px;
   bottom: 3px;
   display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  pointer-events: none;
+}
+
+.topologygraph-legend {
+  display: flex;
+  flex: 0 1 auto;
   flex-wrap: wrap;
-  gap: 2px 10px;
-  max-width: 55%;
+  gap: 2px 9px;
+  min-width: 0;
   font-size: 11px;
   opacity: 0.75;
-  pointer-events: none;
 
   span {
     display: inline-flex;
@@ -343,10 +354,9 @@
 }
 
 .topologygraph-hint {
-  position: absolute;
-  right: 8px;
-  bottom: 4px;
+  flex: none;
+  margin-bottom: 1px;
   font-size: 11px;
+  white-space: nowrap;
   opacity: 0.6;
-  pointer-events: none;
 }
