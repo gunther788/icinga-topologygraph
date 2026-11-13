@@ -238,7 +238,7 @@
     // Drawing constants. BASE spacing is the tightest layout; it is widened to
     // fill the window when there is room (see computeLayout).
     const FONT_SIZE = 12;
-    const BASE = {rowHeight: 24, columnGap: 81, subColumnGap: 36};
+    const BASE = {rowHeight: 24, columnGap: 90, subColumnGap: 40};
     const PADDING = 16;
     // Circle centre to the end of its label (labels sit left of the dot); the
     // label's plate stays clear of the service ring (radius 8.5, 2px wide)
@@ -889,7 +889,7 @@
             const elk = new ELK();
             const ROW = BASE.rowHeight;
             const DOT_PAD = 4; // space right of a dot
-            const LAYER_GAP = 54;
+            const LAYER_GAP = 60;
             const labelWidth = measureLabels(nodes);
             const names = new Set(nodes.map(n => n.name));
             const validLinks = links.filter(l => names.has(l.source) && names.has(l.target) && l.source !== l.target);

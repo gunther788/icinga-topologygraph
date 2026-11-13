@@ -12,9 +12,7 @@ const SAMPLES = {
     parents23: {maxCrossings: 2, minHorizontal: 6},
     // Most hosts here have several parents at different heights, so in this
     // window no arrow comes out exactly level
-    // (14 with straight lines since the gaps between levels shrank by 10%;
-    // the drawn curves still cross 13 times)
-    random40: {maxCrossings: 14, minHorizontal: 0}
+    random40: {maxCrossings: 13, minHorizontal: 0}
 };
 
 for (const [name, limits] of Object.entries(SAMPLES)) {
