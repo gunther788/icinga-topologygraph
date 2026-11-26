@@ -29,10 +29,15 @@ group, the host groups offered on the page, and the refresh interval.
 
 - **Layout:** parents are on the right and children on the left. Each arrow points from a child up to its parent, the way
   parents are configured and data usually flows.
-- **Rightmost column:** hosts with no parents (typically the synthetic checks themselves) form the rightmost level.
-  Hosts that are parents of exactly the same children are drawn together in one rounded box with a single exit point
-  for their arrows. That column is wrapped into several side-by-side sub-columns, so a long list of checks doesn't
-  make the graph very tall.
+- **Levels:** a host's level is its distance from the hosts without children on the left: those are level 0, and a
+  parent sits one level past its deepest child. Each level is one column, so parents with the same level, and in
+  particular parents of the same children, always share a column, and every arrow points right. Both layout
+  engines use these levels.
+- **Rightmost column:** the hosts at the highest level (they never have parents) form the rightmost column. Hosts
+  there that are parents of exactly the same children are drawn together in one rounded box with a single exit
+  point for their arrows, and the column is wrapped into several side-by-side sub-columns, so a long list of checks
+  doesn't make the graph very tall. Hosts without parents at a lower level are boxed with the hosts in their
+  column that have the same children.
 - **Boxes further left:** hosts that have the same parents and the same children as each other, at least two of
   them, are also drawn together in a box. The box then has one arrow to each parent and each child has one arrow
   to the box, instead of an arrow per host, so a farm of identical web or app servers reads as one step in the
@@ -179,11 +184,11 @@ On the test samples (1400×800 window):
 
 | sample | layout | crossings | arrows through boxes/labels | level arrows | shown at |
 |---|---|---|---|---|---|
-| 23 parents | standard | 2 | 1 | 6/14 | 100% |
-| 23 parents | ELK / hybrid | 4 | 0 | 6/14 | 100% |
-| random 40 | standard | 13 | 6 | 0/26 | 100% |
-| random 40 | ELK | 10 | 0 | 6/26 | 64% |
-| random 40 | hybrid | 10 | 0 | 7/26 | 100% |
+| 23 parents | standard | 2 | 0 | 1/14 | 100% |
+| 23 parents | ELK / hybrid | 2 | 0 | 6/14 | 100% |
+| random 40 | standard | 10 | 4 | 5/26 | 100% |
+| random 40 | ELK | 7 | 0 | 6/26 | 64% |
+| random 40 | hybrid | 10 | 0 | 5/26 | 100% |
 
 When the rightmost column isn't too tall, as in the 23-parent sample, hybrid and ELK give the same picture. To compare the two on your own hosts, save the output of `…/topologygraph/index/data` to a file and
 run `npm run compare -- that-file.json` in `tests/`. See [tests/README.md](tests/README.md).

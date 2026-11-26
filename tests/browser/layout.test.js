@@ -8,8 +8,12 @@ const {open, fixture, metrics} = require('./harness');
 // when these tests were written (1400x800 window). Tighten them when the
 // layout improves; a failure here means a change made the layout worse.
 const SAMPLES = {
-    small: {maxCrossings: 0, minHorizontal: 2},
-    parents23: {maxCrossings: 2, minHorizontal: 6},
+    // Levels count from the hosts without children on the left, so a host
+    // whose only parent is far right gets a long, sloping arrow (web-2 in
+    // small; in parents23 core-router, a parent of probe-syd, takes the
+    // rightmost column, so the probes share a column with probe-syd)
+    small: {maxCrossings: 0, minHorizontal: 1},
+    parents23: {maxCrossings: 2, minHorizontal: 1},
     // Most hosts here have several parents at different heights, so in this
     // window no arrow comes out exactly level
     random40: {maxCrossings: 13, minHorizontal: 0}

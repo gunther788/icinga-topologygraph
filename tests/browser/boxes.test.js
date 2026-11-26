@@ -62,7 +62,10 @@ for (const layout of ['standard', 'elk', 'hybrid']) {
             assert.equal(toParents(d, boxWith(d, SIBLINGS[1])).length, 1, 'db box: one arrow up');
             assert.equal(d.arrows.length, 13, 'one arrow per pair of boxes or hosts (the data has 30 links)');
             assert.ok(!boxWith(d, ['lb-1', 'lb-2']), 'lb-1 and lb-2 have different children: no box');
-            assert.equal(d.boxes.length, 6, 'three sibling boxes and three rightmost boxes');
+            // probe-blog (only web-4 as its child) is a level further left than
+            // probe-shop and probe-api: the standard layout draws it on its own,
+            // ELK keeps a one-host box for every host without parents
+            assert.equal(d.boxes.length, layout === 'standard' ? 5 : 6, 'three sibling boxes and the boxes of hosts without parents');
             assert.deepEqual(errors, []);
         } finally {
             await close();
