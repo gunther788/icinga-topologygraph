@@ -125,45 +125,45 @@
     }
 
     /**
-     * Lay out a directed acyclic graph in columns (parents left, children right).
+     * Lay out a directed acyclic graph in columns (children left, parents right).
      *
-     * Each node's column is the length of the longest parent chain above it, so a
-     * host with several parents always sits to the right of all of them. Rows are
-     * ordered with a few barycenter sweeps to reduce crossing edges.
+     * Each node's level is its distance from the hosts without children on the
+     * left (the longest chain of children below it), so parents with the same
+     * level share a column, and a host always sits to the right of all of its
+     * children. Rows are ordered with a few barycenter sweeps to reduce
+     * crossing edges.
      */
     function layout(nodes, links) {
         const byName = new Map(nodes.map(n => [n.name, n]));
         const parents = new Map(nodes.map(n => [n.name, []]));
         const children = new Map(nodes.map(n => [n.name, []]));
-        const indegree = new Map(nodes.map(n => [n.name, 0]));
 
         links.forEach(l => {
             if (!byName.has(l.source) || !byName.has(l.target)) return;
             children.get(l.source).push(l.target);
             parents.get(l.target).push(l.source);
-            indegree.set(l.target, indegree.get(l.target) + 1);
         });
 
-        // Longest-path layering via Kahn's topological sort
-        const layer = new Map(nodes.map(n => [n.name, 0]));
-        const queue = nodes.filter(n => indegree.get(n.name) === 0).map(n => n.name);
-        const seen = new Set();
-        while (queue.length) {
-            const name = queue.shift();
-            seen.add(name);
-            children.get(name).forEach(child => {
-                layer.set(child, Math.max(layer.get(child), layer.get(name) + 1));
-                indegree.set(child, indegree.get(child) - 1);
-                if (indegree.get(child) === 0) queue.push(child);
-            });
-        }
-        // Icinga rejects dependency cycles, but don't hang or drop nodes if one slips through
-        nodes.forEach(n => {
-            if (!seen.has(n.name)) {
-                const maxParent = Math.max(-1, ...parents.get(n.name).filter(p => seen.has(p)).map(p => layer.get(p)));
-                layer.set(n.name, maxParent + 1);
-            }
-        });
+        // Levels count from the left: hosts without children are level 0, and
+        // a parent sits one level past its deepest child, so parents with the
+        // same children always share a column and every arrow points right.
+        // Columns are numbered from the right (column 0 is the rightmost), so
+        // a host's column is the highest level minus its own.
+        const level = new Map();
+        const visiting = new Set();
+        const levelOf = name => {
+            if (level.has(name)) return level.get(name);
+            // Icinga rejects dependency cycles, but don't hang if one slips through
+            if (visiting.has(name)) return 0;
+            visiting.add(name);
+            const value = Math.max(-1, ...children.get(name).map(levelOf)) + 1;
+            visiting.delete(name);
+            level.set(name, value);
+            return value;
+        };
+        nodes.forEach(n => levelOf(n.name));
+        const highest = Math.max(0, ...level.values());
+        const layer = new Map(nodes.map(n => [n.name, highest - level.get(n.name)]));
 
         const layerCount = Math.max(0, ...layer.values()) + 1;
         const columns = Array.from({length: layerCount}, () => []);
@@ -218,16 +218,17 @@
     }
 
     /**
-     * Hosts that have parents and share exactly the same parents and the same
-     * children with at least one other host: drawn together in one box, with
+     * Hosts that have parents (or, with withoutParents, any hosts) and share
+     * exactly the same parents and the same children with at least one other
+     * host: drawn together in one box, with
      * one arrow from each parent into the box and one from the box to each
      * child. Returns arrays of names, each sorted.
      */
-    function siblingGroups(names, parentsOf, childrenOf) {
+    function siblingGroups(names, parentsOf, childrenOf, withoutParents = false) {
         const byKey = new Map();
         names.forEach(name => {
             const parents = parentsOf.get(name) || [];
-            if (!parents.length) return;
+            if (!parents.length && !withoutParents) return;
             const key = parents.slice().sort().join("\0") + "\u0001" + (childrenOf.get(name) || []).slice().sort().join("\0");
             if (!byKey.has(key)) byKey.set(key, []);
             byKey.get(key).push(name);
@@ -308,7 +309,10 @@
         const alternative = new Set(validLinks.filter(l => l.redundancy_group && !isMembership(nodes, l)).map(l => l.source));
         // Hosts further left with the same parents and children share a box
         const siblingOf = new Map();
-        siblingGroups(nodes.map(n => n.name).filter(name => !alternative.has(name)), parentsOf, childrenOf).forEach(names => {
+        // (hosts without parents in a level further left too; those in the
+        // rightmost column are grouped below)
+        siblingGroups(nodes.map(n => n.name).filter(name => !alternative.has(name) && !rightmost.has(name)),
+            parentsOf, childrenOf, true).forEach(names => {
             const group = {names, children: childrenOf.get(names[0]).slice()};
             names.forEach(name => siblingOf.set(name, group));
         });
@@ -949,6 +953,9 @@
                 "elk.algorithm": "layered",
                 "elk.direction": "LEFT",
                 "elk.edgeRouting": "ORTHOGONAL",
+                // Levels count from the hosts without children on the left, as in
+                // the standard layout: parents with the same level share a column
+                "elk.layered.layering.strategy": "LONGEST_PATH",
                 "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
                 "elk.layered.spacing.nodeNodeBetweenLayers": String(LAYER_GAP),
                 "elk.layered.spacing.edgeNodeBetweenLayers": "12",
